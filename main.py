@@ -1,0 +1,479 @@
+#!/usr/bin/env python3
+"""
+IDEUSS Lead Intake API  v1.0
+Servicio receptor de leads multi-fuente para el sistema de prospección IDEUSS.
+
+Fuentes que alimentan este servicio:
+  - agente.ideuss.com   (WhatsApp/Chatbot)
+  - diagnostico.ideuss.com (Diagnóstico de procesos)
+  - landing pages / formularios
+
+Acciones automáticas por cada lead recibido:
+  1. Diagnóstico StoryBrand del sitio web
+  2. Registro en Pipedrive → Pipeline AI Web Factory
+  3. Nota HTML con señal de dolor detectada
+  4. Actividad de seguimiento programada
+  5. Notificación inmediata en Telegram
+
+Endpoints:
+  POST /api/lead   → Recibir nuevo lead
+  GET  /health     → Estado del servicio
+"""
+
+import json
+import logging
+import os
+import re
+import ssl
+import threading
+import urllib.error
+import urllib.parse
+import urllib.request
+from datetime import datetime, timedelta
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level   = logging.INFO,
+    format  = "[%(asctime)s] %(message)s",
+    datefmt = "%H:%M:%S"
+)
+log = logging.getLogger("ideuss-intake")
+
+# ── SSL ───────────────────────────────────────────────────────────────────────
+SSL_CTX = ssl.create_default_context()
+SSL_CTX.check_hostname = False
+SSL_CTX.verify_mode    = ssl.CERT_NONE
+
+# ── Credenciales desde variables de entorno ───────────────────────────────────
+PIPEDRIVE_API_KEY  = os.environ.get("PIPEDRIVE_API_KEY", "")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_HOME_CHANNEL", "8808084550")
+PORT               = int(os.environ.get("PORT", "8765"))
+
+# ── Pipeline AI Web Factory (Pipedrive) ───────────────────────────────────────
+PIPELINE_ID = 28
+STAGES = {
+    "cualificado":          145,
+    "contacto_establecido": 146,
+    "definiendo_mockup":    147,
+    "propuesta_realizada":  148,
+    "en_negociacion":       149,
+}
+
+# ── Fuentes y prioridades ─────────────────────────────────────────────────────
+FUENTES = {
+    "whatsapp_agente":      {"label": "💬 WhatsApp",    "prioridad": "alta"},
+    "diagnostico_procesos": {"label": "🔍 Diagnóstico", "prioridad": "alta"},
+    "landing_contenido":    {"label": "📄 Landing",     "prioridad": "alta"},
+    "brief_completado":     {"label": "📋 Brief Web",   "prioridad": "muy_alta"},
+    "hermes_saliente":      {"label": "🤖 Hermes",      "prioridad": "normal"},
+}
+
+# ── Schema de referencia para documentación ───────────────────────────────────
+SCHEMA = {
+    "fuente":    "whatsapp_agente | diagnostico_procesos | landing_contenido | brief_completado",
+    "nombre":    "Nombre del negocio (requerido)",
+    "email":     "email@negocio.com",
+    "telefono":  "3001234567",
+    "url_sitio": "https://negocio.com",
+    "ciudad":    "Cali",
+    "niche":     "Clínica Dental / Veterinaria / Estética...",
+    "contexto":  "Qué dijo el cliente, qué necesita (texto libre)",
+}
+
+# ═════════════════════════════════════════════════════════════════════════════
+# UTILIDADES HTTP
+# ═════════════════════════════════════════════════════════════════════════════
+
+def http_post(url: str, payload: dict, headers: dict = None) -> dict | None:
+    body = json.dumps(payload).encode()
+    hdrs = {"Content-Type": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
+    try:
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=15) as r:
+            return json.loads(r.read())
+    except Exception as e:
+        log.warning(f"HTTP POST error [{url[:50]}]: {e}")
+    return None
+
+
+def http_put(url: str, payload: dict) -> bool:
+    body = json.dumps(payload).encode()
+    req  = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": "application/json"},
+        method="PUT"
+    )
+    try:
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=15) as r:
+            data = json.loads(r.read())
+            return data.get("success", False)
+    except Exception as e:
+        log.warning(f"HTTP PUT error: {e}")
+    return False
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PIPEDRIVE
+# ═════════════════════════════════════════════════════════════════════════════
+
+def pd_post(endpoint: str, payload: dict):
+    """POST a Pipedrive API. Retorna ID del recurso creado o None."""
+    if not PIPEDRIVE_API_KEY:
+        return None
+    url  = f"https://api.pipedrive.com/v1/{endpoint}?api_token={PIPEDRIVE_API_KEY}"
+    data = http_post(url, payload)
+    if data and data.get("success"):
+        return data["data"].get("id")
+    if data:
+        log.warning(f"Pipedrive [{endpoint}]: {data.get('error')}")
+    return None
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# TELEGRAM
+# ═════════════════════════════════════════════════════════════════════════════
+
+def tg_send(message: str):
+    """Envía mensaje a Telegram."""
+    if not TELEGRAM_BOT_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    http_post(url, {
+        "chat_id":    TELEGRAM_CHAT_ID,
+        "text":       message,
+        "parse_mode": "Markdown",
+    })
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# DIAGNÓSTICO STORYBRAND
+# ═════════════════════════════════════════════════════════════════════════════
+
+def fetch_page(url: str, timeout=10) -> str | None:
+    """Descarga una página y devuelve el texto limpio."""
+    if not url:
+        return None
+    try:
+        if not url.startswith("http"):
+            url = "https://" + url
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; IDEUSSBot/1.0)"
+        })
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=timeout) as r:
+            raw  = r.read(80000).decode("utf-8", errors="ignore")
+            text = re.sub(r"<script[^>]*>.*?</script>", " ", raw, flags=re.DOTALL)
+            text = re.sub(r"<style[^>]*>.*?</style>",   " ", text, flags=re.DOTALL)
+            text = re.sub(r"<[^>]+>", " ", text)
+            return re.sub(r"\s+", " ", text).lower().strip()
+    except Exception:
+        return None
+
+
+PAIN_SIGNALS = [
+    {
+        "name":        "sin_web",
+        "description": "No tiene sitio web propio",
+        "message":     "No encontramos sitio web propio. El 87% de los clientes buscan servicios online antes de llamar. Sin web, son invisibles para la mayoría de sus clientes potenciales.",
+        "web_proposal": True,
+        "check": lambda t, u: not u and t is None,
+    },
+    {
+        "name":        "sin_cita_online",
+        "description": "No ofrece reserva de citas online",
+        "message":     "Su sitio web no permite reservar citas online. Los clientes modernos esperan poder agendar en 30 segundos desde el móvil — sin llamar, sin esperar.",
+        "web_proposal": True,
+        "check": lambda t, u: bool(u) and not any(
+            w in (t or "") for w in ["agenda","reserva","cita online","book","turnos","calendar","appointment"]
+        ),
+    },
+    {
+        "name":        "whatsapp_manual",
+        "description": "Usa WhatsApp manual como único canal digital",
+        "message":     "Usan WhatsApp como canal principal sin automatización. Cada mensaje fuera de horario es un cliente perdido. Un chatbot IA atiende 24/7 sin costo adicional.",
+        "web_proposal": True,
+        "check": lambda t, u: bool(u) and (
+            "whatsapp" in (t or "") and
+            not any(w in (t or "") for w in ["chatbot","bot","automatico","automático","24/7"])
+        ),
+    },
+    {
+        "name":        "web_desactualizada",
+        "description": "Sitio web sin propuesta de valor clara (StoryBrand)",
+        "message":     "Su sitio web no comunica claramente qué problema resuelve ni por qué elegirlos. Los visitantes se van en 8 segundos si no ven la propuesta de valor de inmediato.",
+        "web_proposal": True,
+        "check": lambda t, u: bool(u) and (
+            t is not None and len(t) < 3000 and
+            not any(w in (t or "") for w in ["resultado","beneficio","transformación","garantía","testimonios","reseñas"])
+        ),
+    },
+    {
+        "name":        "sin_reseñas_gestionadas",
+        "description": "Sin sistema de gestión de reseñas online",
+        "message":     "No gestionan activamente sus reseñas online. El 93% de los consumidores lee reseñas antes de elegir un proveedor. Un sistema automático puede duplicar su calificación en 60 días.",
+        "web_proposal": True,
+        "check": lambda t, u: bool(u) and not any(
+            w in (t or "") for w in ["google","reseña","opinión","valoración","review","calificación"]
+        ),
+    },
+]
+
+
+def run_diagnostic(url_sitio: str) -> dict:
+    """Analiza el sitio web y retorna la señal de dolor StoryBrand detectada."""
+    page_text = fetch_page(url_sitio) if url_sitio else None
+
+    for signal in PAIN_SIGNALS:
+        try:
+            if signal["check"](page_text, url_sitio):
+                return {
+                    "name":         signal["name"],
+                    "description":  signal["description"],
+                    "message":      signal["message"],
+                    "web_proposal": signal.get("web_proposal", False),
+                }
+        except Exception:
+            continue
+
+    return {
+        "name":         "procesos_manuales",
+        "description":  "Procesos operativos no automatizados",
+        "message":      "Sus procesos de atención, seguimiento y marketing dependen de tareas manuales que consumen tiempo y generan errores. La automatización IA puede recuperar 15+ horas semanales.",
+        "web_proposal": False,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PIPELINE PRINCIPAL DE INGESTA
+# ═════════════════════════════════════════════════════════════════════════════
+
+def process_lead(data: dict) -> dict:
+    """
+    Ejecuta el pipeline completo para un lead entrante:
+    diagnóstico → Pipedrive → Telegram
+    """
+    fuente    = data.get("fuente", "desconocida")
+    nombre    = data.get("nombre", "").strip()
+    email     = data.get("email", "").strip()
+    telefono  = data.get("telefono", "").strip()
+    url_sitio = data.get("url_sitio", "").strip()
+    ciudad    = data.get("ciudad", "Colombia").strip()
+    niche     = data.get("niche", "Empresa").strip()
+    contexto  = data.get("contexto", "").strip()
+
+    fuente_info = FUENTES.get(fuente, {"label": fuente, "prioridad": "normal"})
+    ts          = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    log.info(f"🔔 [{fuente_info['label']}] {nombre} | {email} | {url_sitio or 'sin web'}")
+
+    # ── 1. Diagnóstico StoryBrand ─────────────────────────────────────────────
+    log.info(f"  🔍 Analizando sitio: {url_sitio or 'N/A'}")
+    pain = run_diagnostic(url_sitio)
+    log.info(f"  🎯 Señal: [{pain['name']}] {pain['description']}")
+
+    # ── 2. Organización en Pipedrive ──────────────────────────────────────────
+    org_id = pd_post("organizations", {"name": nombre})
+    log.info(f"  🏢 Org: {org_id}")
+
+    # ── 3. Persona de contacto ────────────────────────────────────────────────
+    person_payload = {"name": f"Contacto — {nombre}"}
+    if org_id:   person_payload["org_id"] = org_id
+    if email:    person_payload["email"]  = [{"value": email,    "label": "work", "primary": True}]
+    if telefono: person_payload["phone"]  = [{"value": telefono, "label": "work", "primary": True}]
+    person_id = pd_post("persons", person_payload)
+
+    # ── 4. Deal en pipeline AI Web Factory ───────────────────────────────────
+    deal_payload = {
+        "title":       f"{nombre} | {fuente_info['label']}",
+        "pipeline_id": PIPELINE_ID,
+        "stage_id":    STAGES["cualificado"],
+        "status":      "open",
+    }
+    if org_id:    deal_payload["org_id"]    = org_id
+    if person_id: deal_payload["person_id"] = person_id
+    deal_id = pd_post("deals", deal_payload)
+    log.info(f"  📌 Deal AI Web Factory: {deal_id}")
+
+    # ── 5. Nota HTML con diagnóstico ──────────────────────────────────────────
+    if deal_id:
+        digits = re.sub(r"[^\d]", "", telefono)
+        wa_url = f"https://wa.me/57{digits}" if digits else ""
+
+        nota = f"""
+<b>🔔 FUENTE: {fuente_info['label']}</b> | <b>📅 {ts}</b><br><br>
+<b>🎯 SEÑAL DE DOLOR (StoryBrand / Donald Miller):</b><br>
+<b>{pain['description']}</b><br>
+{pain['message']}<br><br>
+<b>📍 Datos del prospecto:</b><br>
+<b>Empresa:</b> {nombre}<br>
+<b>Nicho:</b> {niche}<br>
+<b>Email:</b> {email or '—'}<br>
+<b>Teléfono:</b> {telefono or '—'}<br>
+{f'<b>WhatsApp:</b> <a href="{wa_url}">{wa_url}</a><br>' if wa_url else ''}
+<b>Sitio web:</b> {f'<a href="{url_sitio}">{url_sitio}</a>' if url_sitio else '—'}<br>
+<b>Ciudad:</b> {ciudad}<br><br>
+<b>💬 Contexto:</b> {contexto or 'Lead directo'}<br>
+<b>🌐 Propuesta web:</b> {'✅ Sí — generar mockup' if pain['web_proposal'] else '❌ No aplica'}<br><br>
+<i>Ingresado automáticamente — IDEUSS Intake API v1.0</i>
+"""
+        pd_post("notes", {"content": nota, "deal_id": deal_id})
+
+        # Actividad de seguimiento
+        due = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        pd_post("activities", {
+            "subject":  f"Seguimiento — {nombre} [{fuente_info['label']}]",
+            "type":     "call",
+            "due_date": due,
+            "due_time": "10:00",
+            "duration": "00:20",
+            "done":     0,
+            "deal_id":  deal_id,
+            "note":     f"Señal: {pain['description']} | Prioridad: {fuente_info['prioridad']}",
+        })
+        log.info(f"  📅 Actividad: {due}")
+
+    # ── 6. Notificación Telegram ──────────────────────────────────────────────
+    prioridad_emoji = (
+        "🔴" if fuente_info["prioridad"] == "muy_alta" else
+        "🟠" if fuente_info["prioridad"] == "alta"     else "🟡"
+    )
+
+    tg_send(f"""{prioridad_emoji} *Nuevo lead — {fuente_info['label']}*
+
+🏢 *{nombre}* | {niche}
+📍 {ciudad}
+📞 {telefono or '—'}  |  ✉️ {email or '—'}
+🌐 {url_sitio or 'Sin web'}
+
+🎯 *Señal detectada:*
+_{pain['description']}_
+
+💬 _{contexto[:100] if contexto else 'Lead directo'}_
+
+🔗 Pipeline: AI Web Factory → Cualificado
+""")
+    log.info(f"  📱 Telegram OK")
+
+    return {
+        "ok":       True,
+        "deal_id":  deal_id,
+        "org_id":   org_id,
+        "pain":     pain["name"],
+        "fuente":   fuente,
+        "ts":       ts,
+    }
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# SERVIDOR HTTP
+# ═════════════════════════════════════════════════════════════════════════════
+
+class Handler(BaseHTTPRequestHandler):
+
+    def log_message(self, *args):
+        pass  # Usar nuestro propio logger
+
+    def send_json(self, code: int, body: dict):
+        payload = json.dumps(body, ensure_ascii=False).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.end_headers()
+        self.wfile.write(payload)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin",  "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        self.end_headers()
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_json(200, {
+                "status":    "ok",
+                "service":   "IDEUSS Lead Intake API",
+                "version":   "1.0",
+                "pipeline":  f"AI Web Factory (ID={PIPELINE_ID})",
+                "timestamp": datetime.now().isoformat(),
+                "schema":    SCHEMA,
+            })
+        elif self.path == "/":
+            self.send_json(200, {
+                "service": "IDEUSS Lead Intake API v1.0",
+                "endpoints": {
+                    "POST /api/lead": "Recibir nuevo lead",
+                    "GET  /health":   "Estado del servicio",
+                }
+            })
+        else:
+            self.send_json(404, {"error": "Not found"})
+
+    def do_POST(self):
+        if self.path != "/api/lead":
+            self.send_json(404, {"error": "Endpoint no encontrado. Usa POST /api/lead"})
+            return
+
+        # Leer body
+        length = int(self.headers.get("Content-Length", 0))
+        body   = self.rfile.read(length)
+
+        try:
+            data = json.loads(body)
+        except Exception:
+            self.send_json(400, {"error": "Body debe ser JSON válido"})
+            return
+
+        # Validar campos requeridos
+        missing = [f for f in ["fuente", "nombre"] if not data.get(f)]
+        if missing:
+            self.send_json(400, {
+                "error":  f"Campos requeridos faltantes: {missing}",
+                "schema": SCHEMA,
+            })
+            return
+
+        # Responder inmediatamente — procesar en background
+        self.send_json(202, {
+            "status":  "accepted",
+            "message": "Lead recibido — procesando en background",
+            "nombre":  data.get("nombre"),
+            "fuente":  data.get("fuente"),
+        })
+
+        def run():
+            try:
+                result = process_lead(data)
+                log.info(f"✅ Completado: {data.get('nombre')} → deal={result.get('deal_id')}")
+            except Exception as e:
+                log.error(f"❌ Error en process_lead: {e}")
+
+        threading.Thread(target=run, daemon=True).start()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# MAIN
+# ═════════════════════════════════════════════════════════════════════════════
+
+if __name__ == "__main__":
+    if not PIPEDRIVE_API_KEY:
+        log.warning("⚠️  PIPEDRIVE_API_KEY no configurada — los leads no se guardarán en Pipedrive")
+    if not TELEGRAM_BOT_TOKEN:
+        log.warning("⚠️  TELEGRAM_BOT_TOKEN no configurada — no habrá notificaciones")
+
+    server = HTTPServer(("0.0.0.0", PORT), Handler)
+    log.info(f"🚀 IDEUSS Lead Intake API — puerto {PORT}")
+    log.info(f"   POST http://0.0.0.0:{PORT}/api/lead")
+    log.info(f"   GET  http://0.0.0.0:{PORT}/health")
+    log.info(f"   Pipeline: AI Web Factory ID={PIPELINE_ID}")
+    log.info(f"   Telegram: {TELEGRAM_CHAT_ID}")
+    log.info("   Esperando leads...\n")
+
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        log.info("🛑 Servicio detenido")
