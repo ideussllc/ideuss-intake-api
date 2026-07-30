@@ -414,8 +414,31 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "Not found"})
 
     def do_POST(self):
-        if self.path != "/api/lead":
-            self.send_json(404, {"error": "Endpoint no encontrado. Usa POST /api/lead"})
+        if self.path not in ("/api/lead", "/api/draft"):
+            self.send_json(404, {"error": "Endpoints: POST /api/lead | POST /api/draft"})
+            return
+
+        # ── /api/draft — crear borrador Gmail con email recién conseguido ─────
+        if self.path == "/api/draft":
+            length = int(self.headers.get("Content-Length", 0))
+            body   = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json(400, {"error": "JSON inválido"})
+                return
+            missing = [f for f in ["nombre", "email"] if not data.get(f)]
+            if missing:
+                self.send_json(400, {"error": f"Campos requeridos: {missing}"})
+                return
+            self.send_json(202, {"status": "accepted", "message": "Creando borrador en background"})
+            def run_draft():
+                try:
+                    result = create_draft_for_lead(data)
+                    log.info(f"✅ Draft: {data.get('nombre')} → {result}")
+                except Exception as e:
+                    log.error(f"❌ Error draft: {e}")
+            threading.Thread(target=run_draft, daemon=True).start()
             return
 
         # Leer body
@@ -453,6 +476,175 @@ class Handler(BaseHTTPRequestHandler):
                 log.error(f"❌ Error en process_lead: {e}")
 
         threading.Thread(target=run, daemon=True).start()
+
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ENDPOINT /api/draft — Crear borrador Gmail cuando se consigue el email
+# ═════════════════════════════════════════════════════════════════════════════
+
+def create_draft_for_lead(data: dict) -> dict:
+    """
+    Crea borrador de email de diagnóstico en Gmail cuando se consigue
+    el email de un prospecto que antes no lo tenía.
+
+    Campos requeridos: nombre, email, niche
+    Campos opcionales: telefono, url_sitio, ciudad, deal_id, pain_name, pain_message
+    """
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    import base64 as _b64
+
+    nombre      = data.get("nombre", "").strip()
+    email       = data.get("email", "").strip()
+    niche       = data.get("niche", "Empresa").strip()
+    url_sitio   = data.get("url_sitio", "")
+    ciudad      = data.get("ciudad", "Colombia")
+    deal_id     = data.get("deal_id", "")
+    pain_name   = data.get("pain_name", "sin_cita_online")
+    pain_msg    = data.get("pain_message", "")
+
+    if not nombre or not email:
+        return {"ok": False, "error": "nombre y email son requeridos"}
+
+    # Si no viene señal de dolor, ejecutar diagnóstico
+    if not pain_msg and url_sitio:
+        pain = run_diagnostic(url_sitio)
+        pain_name = pain["name"]
+        pain_msg  = pain["message"]
+    elif not pain_msg:
+        pain_msg = (
+            "Sus procesos de atención, seguimiento y marketing dependen de "
+            "tareas manuales. La automatización IA puede recuperar 15+ horas semanales."
+        )
+
+    # Firma y configuración
+    SENDER_NAME  = "Alejandro Torres"
+    AGENCY_NAME  = "IDEUSS — Agencia IA y Automatización"
+    BOOKING_URL  = "https://www.ideuss.com/agendar-reuniones/"
+    BRIEF_URL    = "https://www.ideuss.com/brief-sitio-web/"
+    MARIA_URL    = "https://wa.me/573158451170170"
+    SENDER_EMAIL = "ventas@ideuss.com"
+    SENDER_PHONE = "(57)(315)8451170"
+
+    city_short = ciudad.split(",")[0].strip()
+    subject    = f"{nombre}: detectamos algo en su negocio que le puede estar costando clientes"
+
+    WEB_SIGNALS = {"sin_web","web_desactualizada","sin_cita_online","sin_reseñas_gestionadas"}
+    brief_block = ""
+    if pain_name in WEB_SIGNALS:
+        brief_block = f"""
+<div style="background:#f0f7ff;border-left:4px solid #1a73e8;padding:16px 20px;
+border-radius:4px;margin:20px 0">
+<p style="margin:0 0 8px"><strong>🎁 Diagnóstico gratuito de su presencia digital</strong></p>
+<p style="margin:0 0 12px;color:#555;font-size:14px">
+Completando este breve formulario (2 minutos) recibirá una propuesta personalizada
+de sitio web automatizado con <strong>CRM, WhatsApp y ChatBot con IA</strong> — sin costo.
+</p>
+<a href="{BRIEF_URL}" style="background:#1a73e8;color:#fff;padding:10px 24px;
+border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">
+📋 Solicitar diagnóstico gratuito
+</a>
+</div>"""
+
+    body_html = f"""<html><body style="font-family:Arial,sans-serif;color:#333;max-width:600px">
+<p>Cordial saludo,</p>
+<p>Mi nombre es <strong>{SENDER_NAME}</strong>, Director General de
+<strong>{AGENCY_NAME}</strong>.</p>
+<p>Revisamos el negocio <strong>{nombre}</strong> en {city_short} y encontramos:</p>
+<blockquote style="border-left:4px solid #f0a500;padding:12px 20px;
+background:#fffbf0;margin:16px 0;border-radius:4px">
+🎯 <strong>{pain_name.upper().replace("_"," ")}</strong><br><br>
+{pain_msg}
+</blockquote>
+<p>En <strong>{AGENCY_NAME}</strong> resolvemos exactamente esto:</p>
+<ul>
+  <li>✅ Automatizar captación y seguimiento de clientes (CRM inteligente)</li>
+  <li>✅ Agendar citas online 24/7 sin intervención humana</li>
+  <li>✅ ChatBot con IA que atiende WhatsApp y web 24/7</li>
+  <li>✅ Conectar marketing, ventas y operación en un sistema</li>
+</ul>
+{brief_block}
+<p>Consulta con nuestra agente <strong>MarIA</strong> experta en Automatización:<br>
+👉 <a href="{MARIA_URL}">{MARIA_URL}</a></p>
+<p style="margin:24px 0">
+<a href="{BOOKING_URL}" style="background:#1a73e8;color:#fff;padding:14px 28px;
+border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;font-size:16px">
+📅 Agendar reunión gratuita (30 min)
+</a>
+</p>
+<p style="color:#888;font-size:12px">
+<a href="{BOOKING_URL}" style="color:#888">{BOOKING_URL}</a>
+</p>
+<hr style="border:none;border-top:1px solid #eee;margin:24px 0">
+<p style="font-size:13px;color:#555">
+<strong>{SENDER_NAME}</strong> | Director General<br>
+<strong>{AGENCY_NAME}</strong><br>
+📱 {SENDER_PHONE} | 🇺🇸 +1(786)579 0043<br>
+✉️ {SENDER_EMAIL}<br>
+🌐 www.IDEUSS.com | www.AutoPrint365.com
+</p>
+</body></html>"""
+
+    # Crear borrador via Gmail API (google_api.py no disponible en intake-api)
+    # Usar OAuth token desde variable de entorno si está disponible
+    import os, base64 as _b64
+    google_token_b64 = os.environ.get("GOOGLE_TOKEN_B64", "")
+    if not google_token_b64:
+        return {"ok": False, "error": "GOOGLE_TOKEN_B64 no configurada — borrador no creado"}
+
+    try:
+        import json as _json
+        import google.oauth2.credentials
+        import googleapiclient.discovery
+
+        token_data = _json.loads(_b64.b64decode(google_token_b64).decode())
+        creds = google.oauth2.credentials.Credentials(
+            token         = token_data.get("token"),
+            refresh_token = token_data.get("refresh_token"),
+            token_uri     = token_data.get("token_uri"),
+            client_id     = token_data.get("client_id"),
+            client_secret = token_data.get("client_secret"),
+        )
+        gmail = googleapiclient.discovery.build("gmail", "v1", credentials=creds)
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"]    = f"{SENDER_NAME} <{SENDER_EMAIL}>"
+        msg["To"]      = email
+        msg.attach(MIMEText(body_html, "html"))
+
+        raw = _b64.urlsafe_b64encode(msg.as_bytes()).decode()
+        draft = gmail.users().drafts().create(
+            userId="me",
+            body={"message": {"raw": raw, "threadId": None}}
+        ).execute()
+
+        draft_id = draft.get("id", "")
+        log.info(f"  📝 Borrador creado: {draft_id} → {email}")
+
+        # Actualizar actividad en Pipedrive si viene deal_id
+        if deal_id and PIPEDRIVE_API_KEY:
+            pd_post("notes", {
+                "content":  f"📧 Borrador de email preparado para {email} — revisión pendiente",
+                "deal_id":  deal_id,
+            })
+
+        # Notificar Telegram
+        tg_send(
+            f"📝 *Borrador preparado* — {nombre}\n\n"
+            f"✉️ Para: `{email}`\n"
+            f"🎯 Señal: _{pain_name.replace('_',' ')}_\n"
+            f"📋 Asunto: {subject[:60]}\n\n"
+            f"Revisa Gmail → Borradores para enviar."
+        )
+
+        return {"ok": True, "draft_id": draft_id, "email": email, "subject": subject}
+
+    except Exception as e:
+        log.error(f"❌ Error creando borrador: {e}")
+        return {"ok": False, "error": str(e)}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
