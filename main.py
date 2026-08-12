@@ -371,6 +371,73 @@ _{pain['description']}_
 # SERVIDOR HTTP
 # ═════════════════════════════════════════════════════════════════════════════
 
+
+# =============================================================================
+# PIPELINE FORMULARIO FABRICA WEB
+# =============================================================================
+def process_webform(data: dict) -> dict:
+    nombre   = (data.get("nombre_del_negocio") or data.get("nombre") or
+                data.get("company") or data.get("name") or "").strip()
+    contacto = (data.get("nombre_de_contacto") or data.get("contacto") or "").strip()
+    email    = (data.get("email_de_contacto") or data.get("email") or "").strip()
+    telefono = (data.get("whatsapp_telefono") or data.get("phone") or
+                data.get("telefono") or "").strip()
+    url      = (data.get("url_del_sitio_web_actual") or data.get("url_sitio") or
+                data.get("website") or data.get("url") or "").strip()
+    ciudad   = (data.get("ciudad_y_pais") or data.get("ciudad") or "Colombia").strip()
+    if not nombre:
+        raise ValueError("Campo nombre requerido")
+    from datetime import timedelta
+    ts  = datetime.now().strftime("%Y-%m-%d %H:%M")
+    due = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
+    log.info(f"Webform: {nombre} | {email} | {url or 'sin web'}")
+    pain = run_diagnostic(url) if url else {
+        "name": "sin_web", "description": "Sin sitio web registrado",
+        "message": "Oportunidad de empezar desde cero con un sitio de alta conversion."
+    }
+    log.info(f"  Senal: [{pain['name']}] {pain['description']}")
+    org_id    = pd_post("organizations", {"name": nombre})
+    person_pl = {"name": contacto or f"Contacto {nombre}"}
+    if org_id:    person_pl["org_id"] = org_id
+    if email:     person_pl["email"]  = [{"value": email,    "label": "work", "primary": True}]
+    if telefono:  person_pl["phone"]  = [{"value": telefono, "label": "work", "primary": True}]
+    person_id = pd_post("persons", person_pl)
+    deal_pl = {
+        "title":       f"{nombre} | Fabrica Web",
+        "pipeline_id": PIPELINE_ID,
+        "stage_id":    146,
+        "status":      "open",
+    }
+    if org_id:    deal_pl["org_id"]    = org_id
+    if person_id: deal_pl["person_id"] = person_id
+    deal_id = pd_post("deals", deal_pl)
+    nota = (
+        f"<b>Formulario Fabrica Web — {ts}</b><br><br>"
+        f"<b>Negocio:</b> {nombre}<br><b>Contacto:</b> {contacto or '—'}<br>"
+        f"<b>Email:</b> {email or 'No indicado'}<br><b>Tel:</b> {telefono or 'No indicado'}<br>"
+        f"<b>Ciudad:</b> {ciudad}<br><b>Web actual:</b> {url or 'Sin sitio'}<br><br>"
+        f"<b>Diagnostico:</b> [{pain['name']}] {pain['description']}<br>"
+        f"{pain.get('message','')}<br><br>"
+        f"<i>Siguiente paso: evaluacion y diagnostico — agendar kick-off.</i>"
+    )
+    if deal_id:
+        http_post(f"{PD_BASE}/notes?api_token={PIPEDRIVE_API_KEY}",
+                  {"content": nota, "deal_id": deal_id})
+        http_post(f"{PD_BASE}/activities?api_token={PIPEDRIVE_API_KEY}", {
+            "subject": f"Evaluacion sitio web — {nombre}", "type": "call",
+            "due_date": due, "due_time": "10:00", "duration": "00:30",
+            "deal_id": deal_id, "done": 0,
+            "note": f"Formulario Fabrica Web. Email:{email} Tel:{telefono} Web:{url or 'sin web'}",
+        })
+    tg_send(
+        f"Nuevo formulario Fabrica Web\n\n"
+        f"{nombre}\n{contacto or ''}\n{email or 'Sin email'}\n"
+        f"{telefono or 'Sin tel'}\n{url or 'Sin web'}\n{ciudad}\n\n"
+        f"Senal: [{pain['name']}] {pain['description']}\n"
+        f"Deal en Contacto Establecido | Actividad: {due}"
+    )
+    return {"deal_id": deal_id, "org_id": org_id, "person_id": person_id, "pain": pain["name"]}
+
 class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args):
@@ -414,8 +481,27 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "Not found"})
 
     def do_POST(self):
-        if self.path not in ("/api/lead", "/api/draft"):
-            self.send_json(404, {"error": "Endpoints: POST /api/lead | POST /api/draft"})
+        if self.path not in ("/api/lead", "/api/draft", "/api/webform"):
+            self.send_json(404, {"error": "Endpoints: POST /api/lead | POST /api/draft | POST /api/webform"})
+            return
+
+        # ── /api/webform — Webhook formulario Fabrica Web ──────────────
+        if self.path == "/api/webform":
+            length = int(self.headers.get("Content-Length", 0))
+            body   = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json(400, {"error": "JSON invalido"})
+                return
+            self.send_json(202, {"status": "accepted", "message": "Formulario Fabrica Web recibido"})
+            def run_webform():
+                try:
+                    result = process_webform(data)
+                    log.info(f"Webform OK: {result}")
+                except Exception as e:
+                    log.error(f"Error webform: {e}", exc_info=True)
+            threading.Thread(target=run_webform, daemon=True).start()
             return
 
         # ── /api/draft — crear borrador Gmail con email recién conseguido ─────
