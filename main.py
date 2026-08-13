@@ -494,10 +494,42 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self.send_json(400, {"error": "JSON invalido"})
                 return
-            self.send_json(202, {"status": "accepted", "message": "Formulario Fabrica Web recibido"})
-            def run_webform():
+
+            # Webhook de Pipedrive envuelve el payload en meta + current
+            # Filtrar solo eventos "create" de deals con prefijo WebIA
+            meta    = data.get("meta", {})
+            current = data.get("current", data)  # fallback si es POST directo
+
+            action     = meta.get("action", "")
+            obj_type   = meta.get("object", "")
+            deal_title = current.get("title", "")
+
+            # Solo procesar: create de deal con prefijo WebIA O payload directo del formulario
+            is_pipedrive_wh = bool(meta.get("action"))
+            if is_pipedrive_wh:
+                if obj_type != "deal" or action != "added":
+                    self.send_json(200, {"status": "ignored", "reason": f"{action}.{obj_type} no aplicable"})
+                    return
+                if not deal_title.startswith("WebIA"):
+                    self.send_json(200, {"status": "ignored", "reason": "Deal sin prefijo WebIA"})
+                    return
+                # Extraer datos del deal de Pipedrive
+                person = current.get("person_id") or {}
+                org    = current.get("org_id") or {}
+                wf_data = {
+                    "nombre":   (org.get("name") if isinstance(org, dict) else "") or deal_title.replace("WebIA | ","").replace("WebIA ",""),
+                    "email":    (person.get("email", [{}])[0].get("value","") if isinstance(person, dict) and person.get("email") else ""),
+                    "telefono": (person.get("phone", [{}])[0].get("value","") if isinstance(person, dict) and person.get("phone") else ""),
+                    "deal_id":  current.get("id"),
+                }
+            else:
+                # Payload directo (test o formulario externo)
+                wf_data = current
+
+            self.send_json(202, {"status": "accepted", "message": "Formulario Fabrica Web procesando"})
+            def run_webform(d=wf_data):
                 try:
-                    result = process_webform(data)
+                    result = process_webform(d)
                     log.info(f"Webform OK: {result}")
                 except Exception as e:
                     log.error(f"Error webform: {e}", exc_info=True)
