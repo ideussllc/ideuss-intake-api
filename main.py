@@ -671,6 +671,88 @@ class Handler(BaseHTTPRequestHandler):
 # ENDPOINT /api/draft — Crear borrador Gmail cuando se consigue el email
 # ═════════════════════════════════════════════════════════════════════════════
 
+def generate_fal_mockup(name: str, niche: str, city: str) -> str | None:
+    """
+    Genera un mockup de sitio web con FAL.ai para incluir en el email.
+    Retorna la URL pública de la imagen o None si falla.
+    """
+    fal_key = os.environ.get("FAL_KEY", "")
+    if not fal_key:
+        log.warning("FAL_KEY no configurada — sin mockup")
+        return None
+
+    niche_lower = (niche or "").lower()
+    if "dental" in niche_lower:
+        paleta = "white and medical blue (#1a73e8)"
+        hero_img = "smiling patient in dental chair with confident doctor"
+        headline = f"Tu Clínica Dental de Confianza en {city}"
+    elif "veterinari" in niche_lower:
+        paleta = "warm green (#2e7d32) and white"
+        hero_img = "happy pet owner with dog and friendly veterinarian"
+        headline = f"Cuidamos a tu Mascota en {city}"
+    elif "estética" in niche_lower or "gym" in niche_lower or "fitness" in niche_lower:
+        paleta = "rose gold (#c2185b) and white"
+        hero_img = "fit person in modern gym with trainer"
+        headline = f"Tu Centro de Bienestar en {city}"
+    elif "spa" in niche_lower or "bienestar" in niche_lower:
+        paleta = "soft gold (#f9a825) and white"
+        hero_img = "relaxed woman in luxury spa treatment"
+        headline = f"Tu Spa y Centro de Bienestar en {city}"
+    elif "óptica" in niche_lower or "optometría" in niche_lower:
+        paleta = "light blue (#0288d1) and grey"
+        hero_img = "person trying modern glasses in bright optical store"
+        headline = f"Tu Óptica de Confianza en {city}"
+    elif "médic" in niche_lower or "clínica" in niche_lower:
+        paleta = "medical blue (#1565c0) and white"
+        hero_img = "professional doctor with patient in modern clinic"
+        headline = f"Tu Consulta Médica en {city}"
+    else:
+        paleta = "professional blue and white"
+        hero_img = "professional business team in modern office"
+        headline = f"{name} — Tu Empresa en {city}"
+
+    prompt = (
+        f"Professional modern website mockup screenshot for '{name}' business in {city} Colombia. "
+        f"Color scheme: {paleta}. Clean professional design. "
+        f"Header: logo placeholder left, navigation center, 'RESERVAR CITA' CTA button right. "
+        f"Hero section: {hero_img}, headline '{headline}', subtitle about quality service. "
+        f"Trust bar: 4.9 Google stars, number of clients, WhatsApp button, Online booking. "
+        f"3 service cards with icons. Testimonials section with client photos. "
+        f"WhatsApp floating button. Professional footer with contact info. "
+        f"Realistic website screenshot, high quality, no watermarks."
+    )
+
+    try:
+        payload = json.dumps({
+            "prompt":      prompt,
+            "image_size":  "portrait_4_3",
+            "num_images":  1,
+            "enable_safety_checker": False,
+        }).encode()
+
+        req = urllib.request.Request(
+            "https://fal.run/fal-ai/flux/schnell",
+            data=payload,
+            headers={
+                "Authorization": f"Key {fal_key}",
+                "Content-Type":  "application/json",
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=60) as r:
+            result = json.loads(r.read())
+
+        images = result.get("images", [])
+        if images:
+            url = images[0].get("url", "")
+            if url:
+                log.info(f"  Mockup FAL generado: {url[:60]}...")
+                return url
+    except Exception as e:
+        log.warning(f"FAL error: {e}")
+    return None
+
+
 def create_draft_for_lead(data: dict) -> dict:
     """
     Crea borrador de email de diagnóstico en Gmail cuando se consigue
@@ -736,6 +818,23 @@ border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">
 </a>
 </div>"""
 
+    # ── Mockup FAL.ai del sitio web sugerido ──────────────────────────────────
+    mockup_block = ""
+    mockup_url = generate_fal_mockup(nombre, niche, city_short)
+    if mockup_url:
+        mockup_block = f"""
+<div style="margin:24px 0;text-align:center">
+<p style="font-weight:bold;color:#333;margin:0 0 12px">
+  🖥️ Así podría verse el sitio web de <strong>{nombre}</strong>:
+</p>
+<img src="{mockup_url}" alt="Mockup {nombre}"
+     style="width:100%;max-width:560px;border-radius:8px;
+            box-shadow:0 4px 16px rgba(0,0,0,0.15);border:1px solid #e0e0e0"/>
+<p style="margin:8px 0 0;font-size:12px;color:#888;font-style:italic">
+  Diseño conceptual generado por IDEUSS — personalizable con su identidad de marca.
+</p>
+</div>"""
+
     body_html = f"""<html><body style="font-family:Arial,sans-serif;color:#333;max-width:600px">
 <p>Cordial saludo,</p>
 <p>Mi nombre es <strong>{SENDER_NAME}</strong>, Director General de
@@ -753,6 +852,7 @@ background:#fffbf0;margin:16px 0;border-radius:4px">
   <li>✅ ChatBot con IA que atiende WhatsApp y web 24/7</li>
   <li>✅ Conectar marketing, ventas y operación en un sistema</li>
 </ul>
+{mockup_block}
 {brief_block}
 <p>Consulta con nuestra agente <strong>MarIA</strong> experta en Automatización:<br>
 👉 <a href="{MARIA_URL}">{MARIA_URL}</a></p>
