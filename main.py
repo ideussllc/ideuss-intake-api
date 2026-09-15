@@ -475,7 +475,30 @@ def process_webform(data: dict) -> dict:
         f"Senal: [{pain['name']}] {pain['description']}\n"
         f"Deal en Contacto Establecido | Actividad: {due}"
     )
-    return {"deal_id": deal_id, "org_id": org_id, "person_id": person_id, "pain": pain["name"]}
+
+    # ── Borrador Gmail con el diagnóstico ─────────────────────────────────────
+    draft_result = {"ok": False}
+    if email:
+        try:
+            draft_result = create_draft_for_lead({
+                "nombre":       nombre,
+                "email":        email,
+                "niche":        "Empresa",
+                "url_sitio":    url,
+                "ciudad":       ciudad,
+                "deal_id":      deal_id,
+                "pain_name":    pain["name"],
+                "pain_message": pain.get("message", pain.get("description", "")),
+            })
+            if draft_result.get("ok"):
+                log.info(f"  Borrador Gmail creado: {draft_result.get('draft_id')}")
+            else:
+                log.warning(f"  Borrador Gmail no creado: {draft_result.get('error')}")
+        except Exception as e:
+            log.error(f"  Error creando borrador Gmail: {e}", exc_info=True)
+
+    return {"deal_id": deal_id, "org_id": org_id, "person_id": person_id,
+            "pain": pain["name"], "draft_ok": draft_result.get("ok", False)}
 
 class Handler(BaseHTTPRequestHandler):
 
