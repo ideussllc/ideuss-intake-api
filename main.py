@@ -116,6 +116,36 @@ def http_put(url: str, payload: dict) -> bool:
     return False
 
 
+def fetch_pipedrive_person(person_id) -> dict | None:
+    """Consulta una Person de Pipedrive por ID (webhooks v2 solo mandan el ID numérico)."""
+    if not person_id or not PIPEDRIVE_API_KEY:
+        return None
+    try:
+        url = f"https://api.pipedrive.com/v1/persons/{person_id}?api_token={PIPEDRIVE_API_KEY}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as r:
+            res = json.loads(r.read())
+            return res.get("data")
+    except Exception as e:
+        log.warning(f"fetch_pipedrive_person error: {e}")
+        return None
+
+
+def fetch_pipedrive_org(org_id) -> dict | None:
+    """Consulta una Organization de Pipedrive por ID (webhooks v2 solo mandan el ID numérico)."""
+    if not org_id or not PIPEDRIVE_API_KEY:
+        return None
+    try:
+        url = f"https://api.pipedrive.com/v1/organizations/{org_id}?api_token={PIPEDRIVE_API_KEY}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=10) as r:
+            res = json.loads(r.read())
+            return res.get("data")
+    except Exception as e:
+        log.warning(f"fetch_pipedrive_org error: {e}")
+        return None
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # PIPEDRIVE
 # ═════════════════════════════════════════════════════════════════════════════
@@ -385,32 +415,41 @@ def process_webform(data: dict) -> dict:
     url      = (data.get("url_del_sitio_web_actual") or data.get("url_sitio") or
                 data.get("website") or data.get("url") or "").strip()
     ciudad   = (data.get("ciudad_y_pais") or data.get("ciudad") or "Colombia").strip()
+    existing_deal_id = data.get("deal_id")  # Si viene del webhook de Pipedrive, el deal YA existe
     if not nombre:
         raise ValueError("Campo nombre requerido")
     from datetime import timedelta
     ts  = datetime.now().strftime("%Y-%m-%d %H:%M")
     due = (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d")
-    log.info(f"Webform: {nombre} | {email} | {url or 'sin web'}")
+    log.info(f"Webform: {nombre} | {email} | {url or 'sin web'} | deal existente:{existing_deal_id}")
     pain = run_diagnostic(url) if url else {
         "name": "sin_web", "description": "Sin sitio web registrado",
         "message": "Oportunidad de empezar desde cero con un sitio de alta conversion."
     }
     log.info(f"  Senal: [{pain['name']}] {pain['description']}")
-    org_id    = pd_post("organizations", {"name": nombre})
-    person_pl = {"name": contacto or f"Contacto {nombre}"}
-    if org_id:    person_pl["org_id"] = org_id
-    if email:     person_pl["email"]  = [{"value": email,    "label": "work", "primary": True}]
-    if telefono:  person_pl["phone"]  = [{"value": telefono, "label": "work", "primary": True}]
-    person_id = pd_post("persons", person_pl)
-    deal_pl = {
-        "title":       f"{nombre} | Fabrica Web",
-        "pipeline_id": PIPELINE_ID,
-        "stage_id":    146,
-        "status":      "open",
-    }
-    if org_id:    deal_pl["org_id"]    = org_id
-    if person_id: deal_pl["person_id"] = person_id
-    deal_id = pd_post("deals", deal_pl)
+
+    if existing_deal_id:
+        # El deal ya lo creó Pipedrive (formulario web) — solo actualizarlo, no duplicar
+        deal_id = existing_deal_id
+        org_id, person_id = None, None
+        http_put(f"{PD_BASE}/deals/{deal_id}?api_token={PIPEDRIVE_API_KEY}", {"stage_id": 146})
+    else:
+        org_id    = pd_post("organizations", {"name": nombre})
+        person_pl = {"name": contacto or f"Contacto {nombre}"}
+        if org_id:    person_pl["org_id"] = org_id
+        if email:     person_pl["email"]  = [{"value": email,    "label": "work", "primary": True}]
+        if telefono:  person_pl["phone"]  = [{"value": telefono, "label": "work", "primary": True}]
+        person_id = pd_post("persons", person_pl)
+        deal_pl = {
+            "title":       f"{nombre} | Fabrica Web",
+            "pipeline_id": PIPELINE_ID,
+            "stage_id":    146,
+            "status":      "open",
+        }
+        if org_id:    deal_pl["org_id"]    = org_id
+        if person_id: deal_pl["person_id"] = person_id
+        deal_id = pd_post("deals", deal_pl)
+
     nota = (
         f"<b>Formulario Fabrica Web — {ts}</b><br><br>"
         f"<b>Negocio:</b> {nombre}<br><b>Contacto:</b> {contacto or '—'}<br>"
@@ -495,19 +534,21 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json(400, {"error": "JSON invalido"})
                 return
 
-            # Webhook de Pipedrive envuelve el payload en meta + current
-            # Filtrar solo eventos "create" de deals con prefijo WebIA
+            # Webhook de Pipedrive envuelve el payload en meta + data (v2) o meta + current (v1)
             meta    = data.get("meta", {})
-            current = data.get("current", data)  # fallback si es POST directo
+            current = data.get("data") or data.get("current") or data  # v2=data, v1=current, fallback=directo
 
             action     = meta.get("action", "")
             obj_type   = meta.get("object", "")
-            deal_title = current.get("title", "")
+            deal_title = (current.get("title") or "") if isinstance(current, dict) else ""
+
+            # Acciones válidas de creación: v1="added", v2="create"
+            CREATE_ACTIONS = ("added", "create")
 
             # Solo procesar: create de deal con prefijo WebIA O payload directo del formulario
             is_pipedrive_wh = bool(meta.get("action"))
             if is_pipedrive_wh:
-                if obj_type != "deal" or action != "added":
+                if obj_type != "deal" or action not in CREATE_ACTIONS:
                     self.send_json(200, {"status": "ignored", "reason": f"{action}.{obj_type} no aplicable"})
                     return
                 if not deal_title.startswith("WebIA"):
@@ -516,6 +557,12 @@ class Handler(BaseHTTPRequestHandler):
                 # Extraer datos del deal de Pipedrive
                 person = current.get("person_id") or {}
                 org    = current.get("org_id") or {}
+                # En v2 person_id/org_id pueden venir solo como ID numérico (no objeto) —
+                # si es así, se consultan por separado.
+                if isinstance(person, (int, str)) or not isinstance(person, dict):
+                    person = fetch_pipedrive_person(person) or {}
+                if isinstance(org, (int, str)) or not isinstance(org, dict):
+                    org = fetch_pipedrive_org(org) or {}
                 wf_data = {
                     "nombre":   (org.get("name") if isinstance(org, dict) else "") or deal_title.replace("WebIA | ","").replace("WebIA ",""),
                     "email":    (person.get("email", [{}])[0].get("value","") if isinstance(person, dict) and person.get("email") else ""),
