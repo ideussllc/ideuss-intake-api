@@ -432,7 +432,7 @@ def process_webform(data: dict) -> dict:
         # El deal ya lo creó Pipedrive (formulario web) — solo actualizarlo, no duplicar
         deal_id = existing_deal_id
         org_id, person_id = None, None
-        http_put(f"{PD_BASE}/deals/{deal_id}?api_token={PIPEDRIVE_API_KEY}", {"stage_id": 146})
+        http_put(f"https://api.pipedrive.com/v1/deals/{deal_id}?api_token={PIPEDRIVE_API_KEY}", {"stage_id": 146})
     else:
         org_id    = pd_post("organizations", {"name": nombre})
         person_pl = {"name": contacto or f"Contacto {nombre}"}
@@ -460,9 +460,9 @@ def process_webform(data: dict) -> dict:
         f"<i>Siguiente paso: evaluacion y diagnostico — agendar kick-off.</i>"
     )
     if deal_id:
-        http_post(f"{PD_BASE}/notes?api_token={PIPEDRIVE_API_KEY}",
+        http_post(f"https://api.pipedrive.com/v1/notes?api_token={PIPEDRIVE_API_KEY}",
                   {"content": nota, "deal_id": deal_id})
-        http_post(f"{PD_BASE}/activities?api_token={PIPEDRIVE_API_KEY}", {
+        http_post(f"https://api.pipedrive.com/v1/activities?api_token={PIPEDRIVE_API_KEY}", {
             "subject": f"Evaluacion sitio web — {nombre}", "type": "call",
             "due_date": due, "due_time": "10:00", "duration": "00:30",
             "deal_id": deal_id, "done": 0,
