@@ -787,7 +787,12 @@ border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;fon
         import google.oauth2.credentials
         import googleapiclient.discovery
 
-        token_data = _json.loads(_b64.b64decode(google_token_b64).decode())
+        _clean_b64 = google_token_b64.strip().replace("\n", "").replace("\r", "").replace(" ", "")
+        try:
+            _decoded_bytes = _b64.b64decode(_clean_b64)
+        except Exception as e:
+            raise ValueError(f"GOOGLE_TOKEN_B64 no es base64 válido ({len(_clean_b64)} chars): {e}")
+        token_data = _json.loads(_decoded_bytes.decode("utf-8", errors="strict"))
         creds = google.oauth2.credentials.Credentials(
             token         = token_data.get("token"),
             refresh_token = token_data.get("refresh_token"),
