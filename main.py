@@ -163,6 +163,46 @@ def pd_post(endpoint: str, payload: dict):
     return None
 
 
+def find_existing_deal_for_email(email: str) -> dict | None:
+    """Busca, dentro del pipeline AI Web Factory, un deal ya existente para este email.
+
+    Evita crear una Organization/Person/Deal duplicada cuando el mismo prospecto
+    vuelve a generar un lead (ej. corre el diagnóstico de procesos más de una vez,
+    o llega por dos fuentes distintas con el mismo correo). Retorna None si no hay
+    coincidencia (o si falla la búsqueda) — en ese caso el llamador crea todo nuevo,
+    como ya hacía antes.
+    """
+    if not email or not PIPEDRIVE_API_KEY:
+        return None
+    try:
+        search_url = (
+            f"https://api.pipedrive.com/v1/persons/search"
+            f"?term={urllib.parse.quote(email)}&fields=email&exact_match=true"
+            f"&api_token={PIPEDRIVE_API_KEY}"
+        )
+        with urllib.request.urlopen(urllib.request.Request(search_url), context=SSL_CTX, timeout=10) as r:
+            items = (json.loads(r.read()).get("data") or {}).get("items") or []
+        if not items:
+            return None
+        person_id = items[0]["item"]["id"]
+
+        deals_url = f"https://api.pipedrive.com/v1/persons/{person_id}/deals?api_token={PIPEDRIVE_API_KEY}"
+        with urllib.request.urlopen(urllib.request.Request(deals_url), context=SSL_CTX, timeout=10) as r:
+            deals = json.loads(r.read()).get("data") or []
+        for d in deals:
+            if d.get("pipeline_id") == PIPELINE_ID:
+                org = d.get("org_id")
+                return {
+                    "deal_id":   d.get("id"),
+                    "person_id": person_id,
+                    "org_id":    org.get("value") if isinstance(org, dict) else org,
+                }
+        return None
+    except Exception as e:
+        log.warning(f"find_existing_deal_for_email error: {e}")
+        return None
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # TELEGRAM
 # ═════════════════════════════════════════════════════════════════════════════
@@ -304,28 +344,35 @@ def process_lead(data: dict) -> dict:
     pain = run_diagnostic(url_sitio)
     log.info(f"  🎯 Señal: [{pain['name']}] {pain['description']}")
 
-    # ── 2. Organización en Pipedrive ──────────────────────────────────────────
-    org_id = pd_post("organizations", {"name": nombre})
-    log.info(f"  🏢 Org: {org_id}")
+    # ── 2/3/4. Organización + Persona + Deal en pipeline AI Web Factory ───────
+    # Buscar primero por email si ya existe un deal de este prospecto en el
+    # pipeline — evita duplicar Org/Person/Deal si el mismo prospecto vuelve a
+    # generar un lead (diagnóstico corrido más de una vez, u otra fuente con el
+    # mismo correo).
+    existing = find_existing_deal_for_email(email) if email else None
+    if existing:
+        org_id, person_id, deal_id = existing["org_id"], existing["person_id"], existing["deal_id"]
+        log.info(f"  ♻️  Deal existente reutilizado (sin duplicar): {deal_id}")
+    else:
+        org_id = pd_post("organizations", {"name": nombre})
+        log.info(f"  🏢 Org: {org_id}")
 
-    # ── 3. Persona de contacto ────────────────────────────────────────────────
-    person_payload = {"name": f"Contacto — {nombre}"}
-    if org_id:   person_payload["org_id"] = org_id
-    if email:    person_payload["email"]  = [{"value": email,    "label": "work", "primary": True}]
-    if telefono: person_payload["phone"]  = [{"value": telefono, "label": "work", "primary": True}]
-    person_id = pd_post("persons", person_payload)
+        person_payload = {"name": f"Contacto — {nombre}"}
+        if org_id:   person_payload["org_id"] = org_id
+        if email:    person_payload["email"]  = [{"value": email,    "label": "work", "primary": True}]
+        if telefono: person_payload["phone"]  = [{"value": telefono, "label": "work", "primary": True}]
+        person_id = pd_post("persons", person_payload)
 
-    # ── 4. Deal en pipeline AI Web Factory ───────────────────────────────────
-    deal_payload = {
-        "title":       f"{nombre} | {fuente_info['label']}",
-        "pipeline_id": PIPELINE_ID,
-        "stage_id":    STAGES["cualificado"],
-        "status":      "open",
-    }
-    if org_id:    deal_payload["org_id"]    = org_id
-    if person_id: deal_payload["person_id"] = person_id
-    deal_id = pd_post("deals", deal_payload)
-    log.info(f"  📌 Deal AI Web Factory: {deal_id}")
+        deal_payload = {
+            "title":       f"{nombre} | {fuente_info['label']}",
+            "pipeline_id": PIPELINE_ID,
+            "stage_id":    STAGES["cualificado"],
+            "status":      "open",
+        }
+        if org_id:    deal_payload["org_id"]    = org_id
+        if person_id: deal_payload["person_id"] = person_id
+        deal_id = pd_post("deals", deal_payload)
+        log.info(f"  📌 Deal AI Web Factory: {deal_id}")
 
     # ── 5. Nota HTML con diagnóstico ──────────────────────────────────────────
     if deal_id:
