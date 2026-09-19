@@ -604,6 +604,24 @@ def generate_mockup_photo(nicho: str, escena: str) -> str | None:
     return None
 
 
+# Encontrado el 19-sep-2026 revisando un mockup real: el modelo inventó un
+# link de Calendly (IDEUSS no usa Calendly) y un pie de página con teléfono
+# y dirección falsos (+54 911 XXXX-XXXX, "Buenos Aires, Argentina" — IDEUSS
+# no tiene sede ahí). El brief nunca trae teléfono/dirección/link de agenda
+# reales para pasarle al prompt, y pedirle "nada de placeholders tipo lorem
+# ipsum" lo empujó a inventar datos que SUENAN reales en vez de dejarlos
+# genéricos — peor que un placeholder obvio. Se corrige prohibiéndolo
+# explícitamente, no aflojando la instrucción anterior.
+_INSTRUCCION_CONTACTO = (
+    "CONTACTO Y ENLACES: no inventes teléfono, email, dirección física ni link de agenda "
+    "(nunca un dominio como calendly.com u otro que no te haya dado el texto StoryBrand) — no los "
+    "tenés como dato real. El footer puede tener el nombre y una frase corta, pero NINGÚN dato de "
+    "contacto específico (ni siquiera uno que parezca plausible). Los únicos enlaces de acción van "
+    "a anclas internas de la misma página (ej. #formulario, #cta), nunca a un dominio externo que no "
+    "esté en el texto StoryBrand."
+)
+
+
 def _instruccion_fotos(foto_hero: str | None, foto_guia: str | None) -> str:
     """
     Arma la instrucción de imágenes que comparten generate_advanced_mockup_html
@@ -674,6 +692,7 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
         f"de que confirme el proyecto, no necesita widgets interactivos con JavaScript (calculadoras, "
         f"calendarios) — el foco es que el diseño y el copy se vean profesionales.\n\n"
         f"IMÁGENES: {instruccion_fotos}\n\n"
+        f"{_INSTRUCCION_CONTACTO}\n\n"
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
     # Etapa de enganche (brief, antes de confirmar): nivel intermedio — ambos
@@ -681,8 +700,13 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
     # imagen y fallback de producción), así que no se introduce un slug nuevo
     # sin probar — la lección de esta sesión es que los slugs "gratis" de
     # OpenRouter cambian seguido, pero estos dos no son gratis y ya se usaron.
-    html = call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=6000) or \
-           call_openrouter("qwen/qwen-2.5-coder-32b-instruct", system, user, max_tokens=6000)
+    # max_tokens en 9000 (antes 6000): con foto+footer completos, 6000 cortaba
+    # el HTML a la mitad (encontrado el 19-sep-2026 en el mockup de
+    # producción, que comparte este mismo límite bajo). Los tres modelos
+    # usados acá y en producción soportan bastante más (Claude Sonnet 4.5
+    # admite hasta 64.000 de salida) — hay margen de sobra.
+    html = call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=9000) or \
+           call_openrouter("qwen/qwen-2.5-coder-32b-instruct", system, user, max_tokens=9000)
     if html:
         html = html.strip()
         html = re.sub(r'^```(?:html)?\s*', '', html)
@@ -776,12 +800,17 @@ def generate_production_html(storybrand_copy: str, nombre: str,
         f"de éxito vs. riesgo, y CTA final destacado. Debe verse como un sitio real terminado, "
         f"no un boceto — usa contenido real del texto, sin placeholders tipo 'lorem ipsum'.\n\n"
         f"IMÁGENES: {instruccion_fotos}\n\n"
+        f"{_INSTRUCCION_CONTACTO}\n\n"
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
-    # Etapa de producción: modelos premium (cliente ya confirmó, calidad > costo)
-    html = call_openrouter("anthropic/claude-sonnet-4.5", system, user, max_tokens=6000) or \
-           call_openrouter("openai/gpt-4o", system, user, max_tokens=6000) or \
-           call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=6000)
+    # Etapa de producción: modelos premium (cliente ya confirmó, calidad > costo).
+    # max_tokens en 12000 (antes 6000): el HTML se cortaba a la mitad con el
+    # límite viejo, encontrado el 19-sep-2026 en un mockup real de IDEUSS (el
+    # footer quedó con una etiqueta sin cerrar). Claude Sonnet 4.5 admite
+    # hasta 64.000 de salida — hay margen de sobra para una página completa.
+    html = call_openrouter("anthropic/claude-sonnet-4.5", system, user, max_tokens=12000) or \
+           call_openrouter("openai/gpt-4o", system, user, max_tokens=12000) or \
+           call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=12000)
     if html:
         html = html.strip()
         html = re.sub(r'^```(?:html)?\s*', '', html)
