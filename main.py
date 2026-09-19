@@ -780,8 +780,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(404, {"error": "Not found"})
 
     def do_POST(self):
-        if self.path not in ("/api/lead", "/api/draft", "/api/webform"):
-            self.send_json(404, {"error": "Endpoints: POST /api/lead | POST /api/draft | POST /api/webform"})
+        if self.path not in ("/api/lead", "/api/draft", "/api/webform", "/api/brief-mockup"):
+            self.send_json(404, {"error": "Endpoints: POST /api/lead | POST /api/draft | POST /api/webform | POST /api/brief-mockup"})
             return
 
         # ── /api/webform — Webhook formulario Fabrica Web ──────────────
