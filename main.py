@@ -1121,6 +1121,39 @@ border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">
 </p>
 </div>"""
 
+    # ── Embudo de marketing (argumento CRM Twenty — Growth/Scale) ─────────────
+    embudo_block = f"""
+<div style="background:#f8f9fa;border:1px solid #e0e0e0;border-radius:10px;padding:20px 24px;margin:24px 0">
+<p style="margin:0 0 12px;font-weight:bold;font-size:15px;color:#333">
+  🎯 Lo que realmente incluye: un embudo de ventas completo
+</p>
+<p style="margin:0 0 14px;font-size:13px;color:#555;line-height:1.6">
+  No es solo un sitio web — es un sistema que acompaña a cada visitante hasta que se convierte en cliente:
+</p>
+<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
+<tr>
+  <td style="padding:8px 10px;background:#e8f0fe;border-radius:6px 0 0 6px;width:25%;text-align:center">
+    <strong>🔍 Atracción</strong><br><span style="color:#666">Su sitio y redes<br>atraen visitantes</span>
+  </td>
+  <td style="padding:8px 10px;background:#fff3cd;width:25%;text-align:center">
+    <strong>💬 Interés</strong><br><span style="color:#666">El agente IA<br>conversa y cualifica</span>
+  </td>
+  <td style="padding:8px 10px;background:#d1ecf1;width:25%;text-align:center">
+    <strong>📋 Decisión</strong><br><span style="color:#666">Twenty CRM organiza<br>el seguimiento</span>
+  </td>
+  <td style="padding:8px 10px;background:#d4edda;border-radius:0 6px 6px 0;width:25%;text-align:center">
+    <strong>🔁 Fidelización</strong><br><span style="color:#666">Seguimiento postventa<br>y recompra</span>
+  </td>
+</tr>
+</table>
+<p style="margin:0;font-size:12px;color:#777;line-height:1.6">
+  Con <strong>Twenty CRM propio</strong> (incluido en los planes Growth y Scale), cada contacto que llega por
+  WhatsApp o su sitio queda registrado y clasificado automáticamente — usted sabe en todo momento cuántos
+  visitantes tiene, cuántos están interesados y cuántos están listos para comprar. Eso es lo que separa un
+  sitio web de un sistema de ventas medible.
+</p>
+</div>"""
+
     body_html = f"""<html><body style="font-family:Arial,sans-serif;color:#333;max-width:600px">
 <p>Cordial saludo,</p>
 <p>Mi nombre es <strong>{SENDER_NAME}</strong>, Director General de
@@ -1139,6 +1172,7 @@ background:#fffbf0;margin:16px 0;border-radius:4px">
   <li>✅ Conectar marketing, ventas y operación en un sistema</li>
 </ul>
 {mockup_block}
+{embudo_block}
 {brief_block}
 <p>Consulta con nuestra agente <strong>MarIA</strong> experta en Automatización:<br>
 👉 <a href="{MARIA_URL}">{MARIA_URL}</a></p>
