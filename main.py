@@ -1058,10 +1058,17 @@ class Handler(BaseHTTPRequestHandler):
                     if result.get("ok"):
                         html_link = f"{result['download_url_html']}?token={token}" if token else result["download_url_html"]
                         png_link  = f"{result['download_url_png']}?token={token}" if (token and result.get('download_url_png')) else result.get("download_url_png")
+                        # Los links van en sintaxis [texto](url) de Markdown de
+                        # Telegram — puestos como texto suelto, Telegram
+                        # interpreta cada "_" del nombre de archivo (nombre del
+                        # cliente + timestamp) como delimitador de cursiva y se
+                        # los come, dejando una URL rota (bug real, encontrado
+                        # el 19-sep-2026). Dentro de [texto](url), la URL no se
+                        # vuelve a parsear como Markdown.
                         msg = (
                             f"🏗️ Mockup de PRODUCCIÓN listo — {brief.get('empresa')}\n\n"
-                            f"📄 Descargar HTML: {html_link}\n" +
-                            (f"🖼️ Preview PNG: {png_link}\n" if png_link else "") +
+                            f"📄 [Descargar HTML]({html_link})\n" +
+                            (f"🖼️ [Preview PNG]({png_link})\n" if png_link else "") +
                             f"\n⚠️ Uso interno IDEUSS — no compartir el link HTML con el cliente."
                         )
                         tg_send(msg)
