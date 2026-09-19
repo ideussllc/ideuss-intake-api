@@ -552,7 +552,7 @@ def generate_storybrand_copy(brief: dict) -> str | None:
         f"5. Llamado a la Acción Directo y Transaccional, 6. Lo que está en juego (Éxito vs. Fracaso)."
     )
     # Etapa prospectiva: modelo gratis
-    return call_openrouter("nvidia/nemotron-3-ultra:free", system, user, max_tokens=1200) or \
+    return call_openrouter("nvidia/nemotron-3-ultra-550b-a55b:free", system, user, max_tokens=1200) or \
            call_openrouter("deepseek/deepseek-chat", system, user, max_tokens=1200)
 
 
@@ -579,7 +579,7 @@ def generate_advanced_mockup_prompt(storybrand_copy: str, nombre: str, nicho: st
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
     prompt = call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=800) or \
-             call_openrouter("qwen/qwen-2.5-coder-32b-instruct:free", system, user, max_tokens=800)
+             call_openrouter("qwen/qwen3-coder:free", system, user, max_tokens=800)
     if prompt:
         prompt = prompt.strip().strip('"')
     return prompt
