@@ -604,6 +604,41 @@ def generate_mockup_photo(nicho: str, escena: str) -> str | None:
     return None
 
 
+def _instruccion_fotos(foto_hero: str | None, foto_guia: str | None) -> str:
+    """
+    Arma la instrucción de imágenes que comparten generate_advanced_mockup_html
+    y generate_production_html — compartida para que un ajuste (como el fix
+    del ícono en coreano, o el de la foto rota) se aplique a los dos mockups
+    a la vez, en vez de arreglar uno y olvidarse del otro (como pasó el
+    19-sep-2026: el fix de fotos se agregó al avanzado pero no al de
+    producción, y el de producción siguió saliendo sin ninguna imagen).
+    """
+    if foto_hero or foto_guia:
+        lineas_fotos = []
+        if foto_hero:
+            lineas_fotos.append(f"- Foto principal (hero): tenés esta URL real, usala en <img src=\"{foto_hero}\">.")
+        else:
+            lineas_fotos.append("- Foto principal (hero): NO tenés foto — el hero va SIN ninguna etiqueta <img>, solo texto.")
+        if foto_guia:
+            lineas_fotos.append(f"- Foto secundaria (sección de autoridad/guía): tenés esta URL real, usala en <img src=\"{foto_guia}\">.")
+        else:
+            lineas_fotos.append("- Foto secundaria (sección de autoridad/guía): NO tenés foto — esa sección va SIN ninguna etiqueta <img>, solo texto.")
+        return (
+            "\n".join(lineas_fotos) + "\n"
+            "Regla general: nunca pongas una etiqueta <img> salvo con una de las dos URLs reales de "
+            "arriba, tal cual, sin modificarlas. Si una sección dice que no tenés foto, esa sección se "
+            "resuelve con texto solo — nunca con un <img> vacío, con src=\"\", ni con una URL inventada "
+            "(no carga). Para cualquier ícono o adorno usá SVG inline o UN SOLO emoji Unicode estándar "
+            "(como ⏰ 🚀 📊 ✅), nunca una palabra o carácter de ningún idioma —ni siquiera como "
+            "decoración— donde debería ir un ícono."
+        )
+    return (
+        "No uses ninguna etiqueta <img> — no hay fotos disponibles para este mockup. Para íconos "
+        "o adornos usá SVG inline o UN SOLO emoji Unicode estándar (como ⏰ 🚀 📊 ✅), nunca una "
+        "palabra o carácter de ningún idioma —ni siquiera como decoración— donde debería ir un ícono."
+    )
+
+
 def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
                                    foto_hero: str | None, foto_guia: str | None) -> str | None:
     """
@@ -626,31 +661,7 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
         "sin explicaciones, sin markdown, sin fences de código, listo para "
         "guardar directamente como archivo .html y abrir en un navegador."
     )
-    if foto_hero or foto_guia:
-        lineas_fotos = []
-        if foto_hero:
-            lineas_fotos.append(f"- Foto principal (hero): tenés esta URL real, usala en <img src=\"{foto_hero}\">.")
-        else:
-            lineas_fotos.append("- Foto principal (hero): NO tenés foto — el hero va SIN ninguna etiqueta <img>, solo texto.")
-        if foto_guia:
-            lineas_fotos.append(f"- Foto secundaria (sección de autoridad/guía): tenés esta URL real, usala en <img src=\"{foto_guia}\">.")
-        else:
-            lineas_fotos.append("- Foto secundaria (sección de autoridad/guía): NO tenés foto — esa sección va SIN ninguna etiqueta <img>, solo texto.")
-        instruccion_fotos = (
-            "\n".join(lineas_fotos) + "\n"
-            "Regla general: nunca pongas una etiqueta <img> salvo con una de las dos URLs reales de "
-            "arriba, tal cual, sin modificarlas. Si una sección dice que no tenés foto, esa sección se "
-            "resuelve con texto solo — nunca con un <img> vacío, con src=\"\", ni con una URL inventada "
-            "(no carga). Para cualquier ícono o adorno usá SVG inline o UN SOLO emoji Unicode estándar "
-            "(como ⏰ 🚀 📊 ✅), nunca una palabra o carácter de ningún idioma —ni siquiera como "
-            "decoración— donde debería ir un ícono."
-        )
-    else:
-        instruccion_fotos = (
-            "No uses ninguna etiqueta <img> — no hay fotos disponibles para este mockup. Para íconos "
-            "o adornos usá SVG inline o UN SOLO emoji Unicode estándar (como ⏰ 🚀 📊 ✅), nunca una "
-            "palabra o carácter de ningún idioma —ni siquiera como decoración— donde debería ir un ícono."
-        )
+    instruccion_fotos = _instruccion_fotos(foto_hero, foto_guia)
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en una Landing "
         f"Page HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: diseño limpio y "
@@ -736,11 +747,16 @@ def generate_advanced_mockup(brief: dict) -> str | None:
 PRODUCTION_MOCKUPS_DIR = "/app/production_mockups"
 
 
-def generate_production_html(storybrand_copy: str, nombre: str) -> str | None:
+def generate_production_html(storybrand_copy: str, nombre: str,
+                              foto_hero: str | None = None, foto_guia: str | None = None) -> str | None:
     """
     Genera el HTML/Tailwind real (editable) a partir del copy StoryBrand.
     Etapa de producción: usa modelos premium (mejor calidad, ya no gratis)
     porque el cliente ya confirmó y esto es la base real de su sitio.
+
+    Recibe fotos igual que el mockup avanzado (mismo `_instruccion_fotos`) —
+    hasta el 19-sep-2026 esta función no las recibía, y el mockup de
+    producción salía sin ninguna imagen aunque el avanzado ya las tuviera.
     """
     system = (
         "Eres un desarrollador frontend senior experto en Tailwind CSS. "
@@ -749,6 +765,7 @@ def generate_production_html(storybrand_copy: str, nombre: str) -> str | None:
         "sin explicaciones, sin markdown, sin fences de código, listo para "
         "guardar directamente como archivo .html y abrir en un navegador."
     )
+    instruccion_fotos = _instruccion_fotos(foto_hero, foto_guia)
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' y conviértelo en una Landing Page "
         f"HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: "
@@ -758,6 +775,7 @@ def generate_production_html(storybrand_copy: str, nombre: str) -> str | None:
         f"iconos, sección de autoridad/testimonios, tarjetas para el plan de 3 pasos, sección "
         f"de éxito vs. riesgo, y CTA final destacado. Debe verse como un sitio real terminado, "
         f"no un boceto — usa contenido real del texto, sin placeholders tipo 'lorem ipsum'.\n\n"
+        f"IMÁGENES: {instruccion_fotos}\n\n"
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
     # Etapa de producción: modelos premium (cliente ya confirmó, calidad > costo)
@@ -801,12 +819,16 @@ def generate_production_mockup(brief: dict, deal_id) -> dict:
     """
     os.makedirs(PRODUCTION_MOCKUPS_DIR, exist_ok=True)
     nombre = brief.get("empresa", "Empresa")
+    nicho  = brief.get("actividadEconomica", "Empresa")
 
     copy_sb = generate_storybrand_copy(brief)
     if not copy_sb:
         return {"ok": False, "error": "No se pudo generar copy StoryBrand"}
 
-    html = generate_production_html(copy_sb, nombre)
+    foto_hero = generate_mockup_photo(nicho, "wide hero banner shot representing the business")
+    foto_guia = generate_mockup_photo(nicho, "close-up shot conveying trust and expertise, like a professional at work")
+
+    html = generate_production_html(copy_sb, nombre, foto_hero, foto_guia)
     if not html:
         return {"ok": False, "error": "No se pudo generar HTML de producción"}
 
