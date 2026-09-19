@@ -730,38 +730,39 @@ def generate_fal_mockup(name: str, niche: str, city: str) -> str | None:
 
     niche_lower = (niche or "").lower()
     if "dental" in niche_lower:
-        paleta = "white and medical blue (#1a73e8)"
+        paleta = "white with medical blue (#1a73e8) accents and a subtle warm orange (#f0a500) CTA button"
         hero_img = "smiling patient in dental chair with confident doctor"
         headline = f"Tu Clínica Dental de Confianza en {city}"
     elif "veterinari" in niche_lower:
-        paleta = "warm green (#2e7d32) and white"
+        paleta = "warm green (#2e7d32) and white with a warm orange (#f0a500) CTA button"
         hero_img = "happy pet owner with dog and friendly veterinarian"
         headline = f"Cuidamos a tu Mascota en {city}"
     elif "estética" in niche_lower or "gym" in niche_lower or "fitness" in niche_lower:
-        paleta = "rose gold (#c2185b) and white"
+        paleta = "rose gold (#c2185b) and white with a warm orange (#f0a500) CTA button"
         hero_img = "fit person in modern gym with trainer"
         headline = f"Tu Centro de Bienestar en {city}"
     elif "spa" in niche_lower or "bienestar" in niche_lower:
-        paleta = "soft gold (#f9a825) and white"
+        paleta = "soft gold (#f9a825) and white, consistent warm orange (#f0a500) CTA button"
         hero_img = "relaxed woman in luxury spa treatment"
         headline = f"Tu Spa y Centro de Bienestar en {city}"
     elif "óptica" in niche_lower or "optometría" in niche_lower:
-        paleta = "light blue (#0288d1) and grey"
+        paleta = "light blue (#0288d1) and grey with a warm orange (#f0a500) CTA button"
         hero_img = "person trying modern glasses in bright optical store"
         headline = f"Tu Óptica de Confianza en {city}"
     elif "médic" in niche_lower or "clínica" in niche_lower:
-        paleta = "medical blue (#1565c0) and white"
+        paleta = "medical blue (#1565c0) and white with a warm orange (#f0a500) CTA button"
         hero_img = "professional doctor with patient in modern clinic"
         headline = f"Tu Consulta Médica en {city}"
     else:
-        paleta = "professional blue and white"
+        paleta = "clean white background with warm orange (#f0a500) accents and CTA button — IDEUSS brand style"
         hero_img = "professional business team in modern office"
         headline = f"{name} — Tu Empresa en {city}"
 
     prompt = (
         f"Professional modern website mockup screenshot for '{name}' business in {city} Colombia. "
-        f"Color scheme: {paleta}. Clean professional design. "
-        f"Header: logo placeholder left, navigation center, 'RESERVAR CITA' CTA button right. "
+        f"Color scheme: {paleta}. Clean minimalist design, generous white space, sans-serif typography — "
+        f"style consistent with a premium automation agency landing page. "
+        f"Header: logo placeholder left, navigation center, 'RESERVAR CITA' CTA button right in warm orange. "
         f"Hero section: {hero_img}, headline '{headline}', subtitle about quality service. "
         f"Trust bar: 4.9 Google stars, number of clients, WhatsApp button, Online booking. "
         f"3 service cards with icons. Testimonials section with client photos. "
