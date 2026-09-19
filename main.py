@@ -570,6 +570,14 @@ def generate_mockup_photo(nicho: str, escena: str) -> str | None:
     bien — el problema de siempre era pedirle que dibujara texto legible.
     Devuelve la URL de FAL directamente (ya alojada en su CDN); si falla,
     el HTML simplemente queda sin esa imagen, no es un paso obligatorio.
+
+    FAL borra los archivos generados a los 7 días por defecto (para
+    siempre, sin recuperación) — encontrado el 19-sep-2026 al revisar dónde
+    quedaban alojadas estas fotos antes de pegarlas en una página real. Sin
+    el header de abajo, cualquier correo con mockup avanzado que un
+    prospecto no abra dentro de esa semana termina con la imagen rota. Se
+    pide `expiration_duration_seconds: null` (sin vencimiento) para que
+    esto no dependa de que alguien la baje a tiempo.
     """
     fal_key = os.environ.get("FAL_KEY", "")
     if not fal_key:
@@ -591,7 +599,11 @@ def generate_mockup_photo(nicho: str, escena: str) -> str | None:
         req = urllib.request.Request(
             "https://fal.run/fal-ai/flux/schnell",
             data=payload,
-            headers={"Authorization": f"Key {fal_key}", "Content-Type": "application/json"},
+            headers={
+                "Authorization": f"Key {fal_key}",
+                "Content-Type": "application/json",
+                "X-Fal-Object-Lifecycle-Preference": json.dumps({"expiration_duration_seconds": None}),
+            },
             method="POST",
         )
         with urllib.request.urlopen(req, context=SSL_CTX, timeout=60) as r:
