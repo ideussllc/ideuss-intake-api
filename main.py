@@ -557,70 +557,69 @@ def generate_storybrand_copy(brief: dict) -> str | None:
            call_openrouter("deepseek/deepseek-chat", system, user, max_tokens=1200)
 
 
-def generate_advanced_mockup_prompt(storybrand_copy: str, nombre: str, nicho: str) -> str | None:
+BRIEF_MOCKUPS_DIR = "/app/brief_mockups"
+
+
+def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str) -> str | None:
     """
-    Paso 2 — Convierte el guión StoryBrand en un prompt de imagen enriquecido
-    y personalizado para FAL.ai (en vez de renderizar HTML real, ya que el
-    contenedor de intake-api no tiene navegador headless instalado).
-    Modelo gratis en etapa prospectiva. Resultado: mockup avanzado y
-    personalizado con el copy real del cliente, no una plantilla genérica.
+    Paso 2 — Convierte el guión StoryBrand en HTML/Tailwind real (mismo patrón
+    que generate_production_html, pero con modelos de nivel intermedio: ni
+    gratis —la calidad de texto de los modelos free es despareja para HTML
+    completo— ni premium —esto todavía es la etapa de enganche, antes de que
+    el cliente confirme—). Reemplaza el enfoque anterior (prompt de imagen +
+    FAL.ai/Flux), que nunca renderiza texto legible: un modelo de imagen
+    "dibuja" letras, no las escribe, y eso generaba errores sistemáticos
+    ("Redes ociales constentle", "Compettentia") sin importar qué tan
+    detallado fuera el prompt — el problema es de la tecnología, no del texto
+    de entrada. Generar HTML real y capturarlo con Playwright, como ya hace
+    el mockup de producción, resuelve esto de raíz.
     """
     system = (
-        "Eres un diseñador UX/UI experto que traduce copy StoryBrand en descripciones "
-        "visuales detalladas para generación de imágenes con IA (FAL.ai / Flux). "
-        "Responde SOLO con el prompt de imagen en inglés, una sola línea, sin explicaciones ni markdown."
+        "Eres un desarrollador frontend senior experto en Tailwind CSS. "
+        "Responde SOLO con el código HTML completo y válido — incluye "
+        "<script src=\"https://cdn.tailwindcss.com\"></script> en el <head> — "
+        "sin explicaciones, sin markdown, sin fences de código, listo para "
+        "guardar directamente como archivo .html y abrir en un navegador."
     )
     user = (
-        f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en un prompt "
-        f"detallado en INGLÉS para generar un mockup de sitio web realista con FAL.ai. El prompt debe "
-        f"describir: header con logo y CTA en naranja (#f0a500), hero section con el titular y subtítulo "
-        f"reales del copy, sección de problema/villano, sección de guía/autoridad con los testimonios "
-        f"reales, tarjetas con el plan de 3 pasos reales, y CTA final. Diseño limpio, minimalista, "
-        f"mucho espacio en blanco, tipografía sans-serif — estilo agencia de automatización premium.\n\n"
+        f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en una Landing "
+        f"Page HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: diseño limpio y "
+        f"moderno con identidad de marca IDEUSS (acentos en naranja #f0a500, fondo blanco, tipografía "
+        f"sans-serif), header con logo placeholder y navegación, hero section con el titular/subtítulo/"
+        f"CTA reales del copy, sección de problema con iconos, sección de autoridad/testimonios, "
+        f"tarjetas para el plan de 3 pasos, sección de éxito vs. riesgo, y CTA final destacado. Debe "
+        f"verse como un sitio real terminado, no un boceto — usa contenido real del texto, sin "
+        f"placeholders tipo 'lorem ipsum'. Esta es una vista previa para enganchar al prospecto antes "
+        f"de que confirme el proyecto, no necesita widgets interactivos con JavaScript (calculadoras, "
+        f"calendarios) — el foco es que el diseño y el copy se vean profesionales.\n\n"
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
-    prompt = call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=800) or \
-             call_openrouter("qwen/qwen-2.5-coder-32b-instruct", system, user, max_tokens=800)
-    if prompt:
-        prompt = prompt.strip().strip('"')
-    return prompt
-
-
-def generate_fal_mockup_from_prompt(prompt: str) -> str | None:
-    """Genera la imagen con FAL.ai a partir de un prompt ya construido (mockup avanzado)."""
-    fal_key = os.environ.get("FAL_KEY", "")
-    if not fal_key or not prompt:
-        return None
-    try:
-        payload = json.dumps({
-            "prompt":      prompt,
-            "image_size":  "portrait_4_3",
-            "num_images":  1,
-            "enable_safety_checker": False,
-        }).encode()
-        req = urllib.request.Request(
-            "https://fal.run/fal-ai/flux/schnell",
-            data=payload,
-            headers={"Authorization": f"Key {fal_key}", "Content-Type": "application/json"},
-            method="POST",
-        )
-        with urllib.request.urlopen(req, context=SSL_CTX, timeout=60) as r:
-            result = json.loads(r.read())
-        images = result.get("images", [])
-        if images:
-            return images[0].get("url", "") or None
-    except Exception as e:
-        log.warning(f"FAL error (mockup avanzado): {e}")
-    return None
+    # Etapa de enganche (brief, antes de confirmar): nivel intermedio — ambos
+    # slugs ya están verificados funcionando en este mismo archivo (prompt de
+    # imagen y fallback de producción), así que no se introduce un slug nuevo
+    # sin probar — la lección de esta sesión es que los slugs "gratis" de
+    # OpenRouter cambian seguido, pero estos dos no son gratis y ya se usaron.
+    html = call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=6000) or \
+           call_openrouter("qwen/qwen-2.5-coder-32b-instruct", system, user, max_tokens=6000)
+    if html:
+        html = html.strip()
+        html = re.sub(r'^```(?:html)?\s*', '', html)
+        html = re.sub(r'\s*```$', '', html)
+    return html
 
 
 def generate_advanced_mockup(brief: dict) -> str | None:
     """
     Orquesta el flujo completo de mockup avanzado (brief completo):
-    Paso 1 (copy StoryBrand) → Paso 2 (prompt enriquecido) → FAL.ai (imagen).
-    Si OpenRouter no está configurado o falla, retorna None (el caller debe
-    hacer fallback a generate_fal_mockup genérico).
+    copy StoryBrand → HTML real (Tailwind, nivel intermedio) → screenshot
+    con Playwright → URL pública del PNG. A diferencia del mockup de
+    producción, el PNG se sirve sin token (es material de venta que se manda
+    al prospecto por correo) y no se entrega el HTML — el código real sigue
+    siendo exclusivo de la etapa de producción, post-confirmación.
+    Si algo falla, retorna None (el caller hace fallback al mockup genérico
+    de generate_fal_mockup, igual que antes).
     """
+    os.makedirs(BRIEF_MOCKUPS_DIR, exist_ok=True)
     nombre = brief.get("empresa", "Empresa")
     nicho  = brief.get("actividadEconomica", "Empresa")
 
@@ -629,14 +628,22 @@ def generate_advanced_mockup(brief: dict) -> str | None:
         log.warning("  No se pudo generar copy StoryBrand — fallback a mockup genérico")
         return None
 
-    prompt = generate_advanced_mockup_prompt(copy_sb, nombre, nicho)
-    if not prompt:
-        log.warning("  No se pudo generar prompt avanzado — fallback a mockup genérico")
+    html = generate_advanced_mockup_html(copy_sb, nombre, nicho)
+    if not html:
+        log.warning("  No se pudo generar HTML avanzado — fallback a mockup genérico")
         return None
 
-    url = generate_fal_mockup_from_prompt(prompt)
-    if url:
-        log.info(f"  🎨 Mockup AVANZADO (OpenRouter+FAL) generado: {url[:60]}...")
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', nombre)[:40]
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    png_filename = f"{safe_name}_{ts}.png"
+    png_path = os.path.join(BRIEF_MOCKUPS_DIR, png_filename)
+
+    if not render_html_to_screenshot(html, png_path):
+        log.warning("  Playwright no pudo capturar el HTML avanzado — fallback a mockup genérico")
+        return None
+
+    url = f"https://intake.ideuss.com/brief_mockups/{png_filename}"
+    log.info(f"  🎨 Mockup AVANZADO (OpenRouter+Playwright) generado: {url}")
     return url
 
 
@@ -892,6 +899,12 @@ class Handler(BaseHTTPRequestHandler):
             # recibe este link completo por Telegram/Pipedrive; nunca se
             # comparte con el cliente.
             self._serve_production_file()
+        elif self.path.startswith("/brief_mockups/"):
+            # Preview del mockup avanzado (solo PNG, nunca HTML) — a
+            # diferencia de /production_mockups/, esto SÍ se manda al
+            # prospecto por correo como material de venta, así que no lleva
+            # token: es una imagen pública, no el código real del sitio.
+            self._serve_brief_mockup_file()
         else:
             self.send_json(404, {"error": "Not found"})
 
@@ -915,6 +928,28 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_brief_mockup_file(self):
+        parsed = urllib.parse.urlparse(self.path)
+        filename = os.path.basename(parsed.path)  # evita path traversal
+        # Solo PNG: el HTML del mockup avanzado nunca se guarda en disco
+        # (generate_advanced_mockup no lo persiste), así que esto además
+        # bloquea cualquier intento de pedir un .html por esta ruta pública.
+        if not filename.endswith(".png"):
+            self.send_json(404, {"error": "Not found"})
+            return
+        filepath = os.path.join(BRIEF_MOCKUPS_DIR, filename)
+        if not os.path.isfile(filepath):
+            self.send_json(404, {"error": "Archivo no encontrado"})
+            return
+        with open(filepath, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/png")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(data)
 
