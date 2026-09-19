@@ -579,7 +579,7 @@ def generate_advanced_mockup_prompt(storybrand_copy: str, nombre: str, nicho: st
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
     prompt = call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=800) or \
-             call_openrouter("qwen/qwen3-coder:free", system, user, max_tokens=800)
+             call_openrouter("qwen/qwen-2.5-coder-32b-instruct", system, user, max_tokens=800)
     if prompt:
         prompt = prompt.strip().strip('"')
     return prompt
@@ -679,7 +679,7 @@ def generate_production_html(storybrand_copy: str, nombre: str) -> str | None:
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
     # Etapa de producción: modelos premium (cliente ya confirmó, calidad > costo)
-    html = call_openrouter("anthropic/claude-3.5-sonnet", system, user, max_tokens=6000) or \
+    html = call_openrouter("anthropic/claude-sonnet-4.5", system, user, max_tokens=6000) or \
            call_openrouter("openai/gpt-4o", system, user, max_tokens=6000) or \
            call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=6000)
     if html:
