@@ -553,6 +553,7 @@ def generate_storybrand_copy(brief: dict) -> str | None:
     )
     # Etapa prospectiva: modelo gratis
     return call_openrouter("nvidia/nemotron-3.5-lightning:free", system, user, max_tokens=1200) or \
+           call_openrouter("deepseek/deepseek-v4-flash-0731", system, user, max_tokens=1200) or \
            call_openrouter("deepseek/deepseek-chat", system, user, max_tokens=1200)
 
 
