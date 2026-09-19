@@ -434,6 +434,27 @@ _{pain['description']}_
 """)
     log.info(f"  📱 Telegram OK")
 
+    # ── 7. Borrador Gmail con diagnóstico + mockup (si hay email) ──────────────
+    draft_result = {"ok": False}
+    if email:
+        try:
+            draft_result = create_draft_for_lead({
+                "nombre":       nombre,
+                "email":        email,
+                "niche":        niche,
+                "url_sitio":    url_sitio,
+                "ciudad":       ciudad,
+                "deal_id":      deal_id,
+                "pain_name":    pain["name"],
+                "pain_message": pain.get("message", pain.get("description", "")),
+            })
+            if draft_result.get("ok"):
+                log.info(f"  📝 Borrador Gmail creado: {draft_result.get('draft_id')}")
+            else:
+                log.warning(f"  ⚠️  Borrador Gmail no creado: {draft_result.get('error')}")
+        except Exception as e:
+            log.error(f"  ❌ Error creando borrador Gmail: {e}", exc_info=True)
+
     return {
         "ok":       True,
         "deal_id":  deal_id,
@@ -441,6 +462,7 @@ _{pain['description']}_
         "pain":     pain["name"],
         "fuente":   fuente,
         "ts":       ts,
+        "draft_ok": draft_result.get("ok", False),
     }
 
 
