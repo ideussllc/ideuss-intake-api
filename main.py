@@ -50,6 +50,7 @@ PIPEDRIVE_API_KEY  = os.environ.get("PIPEDRIVE_API_KEY", "")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.environ.get("TELEGRAM_HOME_CHANNEL", "8808084550")
 PORT               = int(os.environ.get("PORT", "8765"))
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 
 # ── Pipeline AI Web Factory (Pipedrive) ───────────────────────────────────────
 PIPELINE_ID = 28
@@ -472,6 +473,173 @@ _{pain['description']}_
 
 
 # =============================================================================
+# OPENROUTER — Mockup avanzado StoryBrand (solo para brief completo)
+# =============================================================================
+
+def call_openrouter(model: str, system: str, user: str, max_tokens: int = 2000) -> str | None:
+    """Llama a un modelo de OpenRouter y retorna el texto de la respuesta."""
+    if not OPENROUTER_API_KEY:
+        log.warning("OPENROUTER_API_KEY no configurada — sin copy/mockup avanzado")
+        return None
+    try:
+        payload = json.dumps({
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user",   "content": user},
+            ],
+            "max_tokens": max_tokens,
+        }).encode()
+        req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=payload,
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type":  "application/json",
+                "HTTP-Referer":  "https://ideuss.com",
+                "X-Title":       "IDEUSS Mockup StoryBrand",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=45) as r:
+            result = json.loads(r.read())
+        return result["choices"][0]["message"]["content"]
+    except Exception as e:
+        log.warning(f"OpenRouter error ({model}): {e}")
+        return None
+
+
+def generate_storybrand_copy(brief: dict) -> str | None:
+    """
+    Paso 1 — Genera el guión StoryBrand (Hero, Problema, Guía, Plan, CTA, Éxito/Fracaso)
+    a partir de las respuestas reales del brief. Modelo gratis en etapa prospectiva.
+    """
+    nombre    = brief.get("empresa", "")
+    nicho     = brief.get("actividadEconomica", "Empresa")
+    buyer     = brief.get("buyerPersona", "")
+    p_ext     = brief.get("problemaExterno", "")
+    p_int     = brief.get("problemaInterno", "")
+    p_fil     = brief.get("problemaFilosofico", "")
+    experiencia  = brief.get("experiencia", "")
+    testimonios  = brief.get("testimonios", "")
+    diferencial  = brief.get("diferencial", "")
+    paso1, paso2, paso3 = brief.get("paso1",""), brief.get("paso2",""), brief.get("paso3","")
+    accion_p  = brief.get("accionPrincipal", "Agendar una llamada")
+    accion_s  = brief.get("accionSecundaria", "")
+    exito     = brief.get("exito", "")
+    fracaso   = brief.get("fracaso", "")
+
+    system = (
+        "Actúa como un experto en Donald Miller's Building a StoryBrand. "
+        "Responde SOLO con el texto estructurado en 6 secciones, sin explicaciones adicionales."
+    )
+    user = (
+        f"Genera el texto para una landing page de {nombre} ({nicho}).\n\n"
+        f"Cliente ideal: {buyer or 'no especificado'}\n"
+        f"Problema externo: {p_ext or 'no especificado'}\n"
+        f"Problema interno: {p_int or 'no especificado'}\n"
+        f"Problema filosófico: {p_fil or 'no especificado'}\n"
+        f"Experiencia/autoridad: {experiencia or 'no especificado'}\n"
+        f"Testimonios: {testimonios or 'no especificado'}\n"
+        f"Diferencial: {diferencial or 'no especificado'}\n"
+        f"Plan: 1) {paso1 or '—'} 2) {paso2 or '—'} 3) {paso3 or '—'}\n"
+        f"Acción principal: {accion_p}\n"
+        f"Acción secundaria: {accion_s or 'no especificado'}\n"
+        f"Éxito si resuelve: {exito or 'no especificado'}\n"
+        f"Riesgo si no resuelve: {fracaso or 'no especificado'}\n\n"
+        f"Estructura: 1. Hero (Titular claro + Subtitular + CTA), 2. El Problema "
+        f"(Villano/Puntos de dolor), 3. Guía (Empatía y Autoridad), 4. El Plan (3 pasos simples), "
+        f"5. Llamado a la Acción Directo y Transaccional, 6. Lo que está en juego (Éxito vs. Fracaso)."
+    )
+    # Etapa prospectiva: modelo gratis
+    return call_openrouter("nvidia/nemotron-3-ultra:free", system, user, max_tokens=1200) or \
+           call_openrouter("deepseek/deepseek-chat", system, user, max_tokens=1200)
+
+
+def generate_advanced_mockup_prompt(storybrand_copy: str, nombre: str, nicho: str) -> str | None:
+    """
+    Paso 2 — Convierte el guión StoryBrand en un prompt de imagen enriquecido
+    y personalizado para FAL.ai (en vez de renderizar HTML real, ya que el
+    contenedor de intake-api no tiene navegador headless instalado).
+    Modelo gratis en etapa prospectiva. Resultado: mockup avanzado y
+    personalizado con el copy real del cliente, no una plantilla genérica.
+    """
+    system = (
+        "Eres un diseñador UX/UI experto que traduce copy StoryBrand en descripciones "
+        "visuales detalladas para generación de imágenes con IA (FAL.ai / Flux). "
+        "Responde SOLO con el prompt de imagen en inglés, una sola línea, sin explicaciones ni markdown."
+    )
+    user = (
+        f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en un prompt "
+        f"detallado en INGLÉS para generar un mockup de sitio web realista con FAL.ai. El prompt debe "
+        f"describir: header con logo y CTA en naranja (#f0a500), hero section con el titular y subtítulo "
+        f"reales del copy, sección de problema/villano, sección de guía/autoridad con los testimonios "
+        f"reales, tarjetas con el plan de 3 pasos reales, y CTA final. Diseño limpio, minimalista, "
+        f"mucho espacio en blanco, tipografía sans-serif — estilo agencia de automatización premium.\n\n"
+        f"TEXTO STORYBRAND:\n{storybrand_copy}"
+    )
+    prompt = call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=800) or \
+             call_openrouter("qwen/qwen-2.5-coder-32b-instruct:free", system, user, max_tokens=800)
+    if prompt:
+        prompt = prompt.strip().strip('"')
+    return prompt
+
+
+def generate_fal_mockup_from_prompt(prompt: str) -> str | None:
+    """Genera la imagen con FAL.ai a partir de un prompt ya construido (mockup avanzado)."""
+    fal_key = os.environ.get("FAL_KEY", "")
+    if not fal_key or not prompt:
+        return None
+    try:
+        payload = json.dumps({
+            "prompt":      prompt,
+            "image_size":  "portrait_4_3",
+            "num_images":  1,
+            "enable_safety_checker": False,
+        }).encode()
+        req = urllib.request.Request(
+            "https://fal.run/fal-ai/flux/schnell",
+            data=payload,
+            headers={"Authorization": f"Key {fal_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=60) as r:
+            result = json.loads(r.read())
+        images = result.get("images", [])
+        if images:
+            return images[0].get("url", "") or None
+    except Exception as e:
+        log.warning(f"FAL error (mockup avanzado): {e}")
+    return None
+
+
+def generate_advanced_mockup(brief: dict) -> str | None:
+    """
+    Orquesta el flujo completo de mockup avanzado (brief completo):
+    Paso 1 (copy StoryBrand) → Paso 2 (prompt enriquecido) → FAL.ai (imagen).
+    Si OpenRouter no está configurado o falla, retorna None (el caller debe
+    hacer fallback a generate_fal_mockup genérico).
+    """
+    nombre = brief.get("empresa", "Empresa")
+    nicho  = brief.get("actividadEconomica", "Empresa")
+
+    copy_sb = generate_storybrand_copy(brief)
+    if not copy_sb:
+        log.warning("  No se pudo generar copy StoryBrand — fallback a mockup genérico")
+        return None
+
+    prompt = generate_advanced_mockup_prompt(copy_sb, nombre, nicho)
+    if not prompt:
+        log.warning("  No se pudo generar prompt avanzado — fallback a mockup genérico")
+        return None
+
+    url = generate_fal_mockup_from_prompt(prompt)
+    if url:
+        log.info(f"  🎨 Mockup AVANZADO (OpenRouter+FAL) generado: {url[:60]}...")
+    return url
+
+
+# =============================================================================
 # PIPELINE FORMULARIO FABRICA WEB
 # =============================================================================
 def process_webform(data: dict) -> dict:
@@ -698,6 +866,49 @@ class Handler(BaseHTTPRequestHandler):
             threading.Thread(target=run_draft, daemon=True).start()
             return
 
+        # ── /api/brief-mockup — mockup AVANZADO (OpenRouter + FAL) para el
+        # brief completo de agente.ideuss.com/api/brief. Se llama por separado
+        # (fire-and-forget) desde route.ts justo después de crear/actualizar
+        # el deal en Pipedrive, pasando el brief completo + deal_id + email. ──
+        if self.path == "/api/brief-mockup":
+            length = int(self.headers.get("Content-Length", 0))
+            body   = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json(400, {"error": "JSON inválido"})
+                return
+            missing = [f for f in ["empresa", "email"] if not data.get(f)]
+            if missing:
+                self.send_json(400, {"error": f"Campos requeridos: {missing}"})
+                return
+            self.send_json(202, {"status": "accepted", "message": "Generando mockup avanzado en background"})
+            def run_brief_mockup(brief=data):
+                try:
+                    log.info(f"🎨 Brief mockup avanzado: {brief.get('empresa')} | {brief.get('email')}")
+                    advanced_url = generate_advanced_mockup(brief)
+                    draft_result = create_draft_for_lead({
+                        "nombre":              brief.get("empresa"),
+                        "email":               brief.get("email"),
+                        "niche":               brief.get("actividadEconomica", "Empresa"),
+                        "url_sitio":           brief.get("sitioActualUrl", ""),
+                        "ciudad":              brief.get("ciudadPais", "Colombia"),
+                        "deal_id":             brief.get("deal_id"),
+                        "pain_name":           "brief_completado",
+                        "pain_message": (
+                            f"Con base en su brief, identificamos que {brief.get('problemaExterno','su negocio')} "
+                            f"es la barrera práctica que más le está costando — y ya tenemos una propuesta "
+                            f"de sitio web lista para mostrarle."
+                        ),
+                        "advanced_mockup_url": advanced_url,
+                    })
+                    log.info(f"✅ Brief mockup completado: {brief.get('empresa')} → "
+                             f"avanzado={'sí' if advanced_url else 'no (fallback genérico)'} draft={draft_result.get('ok')}")
+                except Exception as e:
+                    log.error(f"❌ Error brief-mockup: {e}", exc_info=True)
+            threading.Thread(target=run_brief_mockup, daemon=True).start()
+            return
+
         # Leer body
         length = int(self.headers.get("Content-Length", 0))
         body   = self.rfile.read(length)
@@ -888,20 +1099,25 @@ border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">
 </a>
 </div>"""
 
-    # ── Mockup FAL.ai del sitio web sugerido ──────────────────────────────────
+    # ── Mockup: avanzado (brief con OpenRouter) o genérico (evaluación gratuita) ──
     mockup_block = ""
-    mockup_url = generate_fal_mockup(nombre, niche, city_short)
+    mockup_url = data.get("advanced_mockup_url") or generate_fal_mockup(nombre, niche, city_short)
+    is_advanced = bool(data.get("advanced_mockup_url"))
     if mockup_url:
+        etiqueta = "Mockup avanzado de su nueva propuesta de sitio web" if is_advanced else \
+                   f"Así podría verse el sitio web de <strong>{nombre}</strong>"
+        pie = "Diseño personalizado basado en su brief — listo para refinar en la reunión." if is_advanced else \
+              "Diseño conceptual generado por IDEUSS — personalizable con su identidad de marca."
         mockup_block = f"""
 <div style="margin:24px 0;text-align:center">
 <p style="font-weight:bold;color:#333;margin:0 0 12px">
-  🖥️ Así podría verse el sitio web de <strong>{nombre}</strong>:
+  🖥️ {etiqueta}:
 </p>
 <img src="{mockup_url}" alt="Mockup {nombre}"
      style="width:100%;max-width:560px;border-radius:8px;
             box-shadow:0 4px 16px rgba(0,0,0,0.15);border:1px solid #e0e0e0"/>
 <p style="margin:8px 0 0;font-size:12px;color:#888;font-style:italic">
-  Diseño conceptual generado por IDEUSS — personalizable con su identidad de marca.
+  {pie}
 </p>
 </div>"""
 
