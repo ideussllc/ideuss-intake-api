@@ -640,6 +640,115 @@ def generate_advanced_mockup(brief: dict) -> str | None:
 
 
 # =============================================================================
+# MOCKUP DE PRODUCCIÓN — HTML/Tailwind real + screenshot (SOLO uso interno IDEUSS)
+#
+# Se dispara MANUALMENTE cuando el cliente confirma el pedido e inicia la fase
+# de producción — no es parte del flujo automático de prospección/brief.
+# Genera código HTML/Tailwind real y editable (a diferencia del mockup
+# avanzado del brief, que solo genera una imagen vía FAL sin código real).
+# El HTML se guarda en el servidor; SOLO IDEUSS puede descargarlo desde el
+# link entregado por Telegram + nota de Pipedrive — el cliente nunca recibe
+# el código, solo la vista previa (imagen) en su comunicación.
+# =============================================================================
+
+PRODUCTION_MOCKUPS_DIR = "/app/production_mockups"
+
+
+def generate_production_html(storybrand_copy: str, nombre: str) -> str | None:
+    """
+    Genera el HTML/Tailwind real (editable) a partir del copy StoryBrand.
+    Etapa de producción: usa modelos premium (mejor calidad, ya no gratis)
+    porque el cliente ya confirmó y esto es la base real de su sitio.
+    """
+    system = (
+        "Eres un desarrollador frontend senior experto en Tailwind CSS. "
+        "Responde SOLO con el código HTML completo y válido — incluye "
+        "<script src=\"https://cdn.tailwindcss.com\"></script> en el <head> — "
+        "sin explicaciones, sin markdown, sin fences de código, listo para "
+        "guardar directamente como archivo .html y abrir en un navegador."
+    )
+    user = (
+        f"Toma el siguiente texto StoryBrand para '{nombre}' y conviértelo en una Landing Page "
+        f"HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: "
+        f"diseño limpio y moderno con identidad de marca IDEUSS (acentos en naranja #f0a500, "
+        f"fondo blanco, tipografía sans-serif), header con logo placeholder y navegación, "
+        f"hero section con el titular/subtítulo/CTA reales del copy, sección de problema con "
+        f"iconos, sección de autoridad/testimonios, tarjetas para el plan de 3 pasos, sección "
+        f"de éxito vs. riesgo, y CTA final destacado. Debe verse como un sitio real terminado, "
+        f"no un boceto — usa contenido real del texto, sin placeholders tipo 'lorem ipsum'.\n\n"
+        f"TEXTO STORYBRAND:\n{storybrand_copy}"
+    )
+    # Etapa de producción: modelos premium (cliente ya confirmó, calidad > costo)
+    html = call_openrouter("anthropic/claude-3.5-sonnet", system, user, max_tokens=6000) or \
+           call_openrouter("openai/gpt-4o", system, user, max_tokens=6000) or \
+           call_openrouter("google/gemini-2.5-flash", system, user, max_tokens=6000)
+    if html:
+        html = html.strip()
+        html = re.sub(r'^```(?:html)?\s*', '', html)
+        html = re.sub(r'\s*```$', '', html)
+    return html
+
+
+def render_html_to_screenshot(html: str, output_path: str) -> bool:
+    """
+    Renderiza el HTML real en Chromium headless (Playwright) y guarda un
+    screenshot .png — para tener una vista previa visual del sitio real,
+    sin depender de FAL.ai ni de texto generado dentro de una imagen.
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page(viewport={"width": 1280, "height": 900})
+            page.set_content(html, wait_until="networkidle", timeout=30000)
+            page.screenshot(path=output_path, full_page=True)
+            browser.close()
+        return True
+    except Exception as e:
+        log.warning(f"Playwright screenshot error: {e}")
+        return False
+
+
+def generate_production_mockup(brief: dict, deal_id) -> dict:
+    """
+    Orquesta el flujo de producción: copy StoryBrand → HTML real (Tailwind,
+    premium) → guarda .html en disco → screenshot .png para preview.
+    Retorna dict con paths locales; el caller es responsable de notificar
+    a IDEUSS (Telegram + nota Pipedrive) con el link de descarga interno,
+    NUNCA se envía al cliente.
+    """
+    os.makedirs(PRODUCTION_MOCKUPS_DIR, exist_ok=True)
+    nombre = brief.get("empresa", "Empresa")
+
+    copy_sb = generate_storybrand_copy(brief)
+    if not copy_sb:
+        return {"ok": False, "error": "No se pudo generar copy StoryBrand"}
+
+    html = generate_production_html(copy_sb, nombre)
+    if not html:
+        return {"ok": False, "error": "No se pudo generar HTML de producción"}
+
+    safe_name = re.sub(r'[^a-zA-Z0-9_-]', '_', nombre)[:40]
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    html_filename = f"{safe_name}_{ts}.html"
+    html_path = os.path.join(PRODUCTION_MOCKUPS_DIR, html_filename)
+    with open(html_path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+    png_filename = f"{safe_name}_{ts}.png"
+    png_path = os.path.join(PRODUCTION_MOCKUPS_DIR, png_filename)
+    screenshot_ok = render_html_to_screenshot(html, png_path)
+
+    return {
+        "ok": True,
+        "html_filename": html_filename,
+        "png_filename": png_filename if screenshot_ok else None,
+        "download_url_html": f"https://intake.ideuss.com/production_mockups/{html_filename}",
+        "download_url_png":  f"https://intake.ideuss.com/production_mockups/{png_filename}" if screenshot_ok else None,
+    }
+
+
+# =============================================================================
 # PIPELINE FORMULARIO FABRICA WEB
 # =============================================================================
 def process_webform(data: dict) -> dict:
@@ -776,12 +885,86 @@ class Handler(BaseHTTPRequestHandler):
                     "GET  /health":   "Estado del servicio",
                 }
             })
+        elif self.path.startswith("/production_mockups/"):
+            # Descarga interna del mockup de producción (HTML/PNG). Protegido
+            # con token simple por query string (?token=...) — solo IDEUSS
+            # recibe este link completo por Telegram/Pipedrive; nunca se
+            # comparte con el cliente.
+            self._serve_production_file()
         else:
             self.send_json(404, {"error": "Not found"})
 
+    def _serve_production_file(self):
+        parsed = urllib.parse.urlparse(self.path)
+        qs = urllib.parse.parse_qs(parsed.query)
+        token = (qs.get("token") or [""])[0]
+        expected = os.environ.get("PRODUCTION_DOWNLOAD_TOKEN", "")
+        if not expected or token != expected:
+            self.send_json(403, {"error": "Token inválido o faltante"})
+            return
+        filename = os.path.basename(parsed.path)  # evita path traversal
+        filepath = os.path.join(PRODUCTION_MOCKUPS_DIR, filename)
+        if not os.path.isfile(filepath):
+            self.send_json(404, {"error": "Archivo no encontrado"})
+            return
+        content_type = "text/html; charset=utf-8" if filename.endswith(".html") else "image/png"
+        with open(filepath, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_POST(self):
-        if self.path not in ("/api/lead", "/api/draft", "/api/webform", "/api/brief-mockup"):
-            self.send_json(404, {"error": "Endpoints: POST /api/lead | POST /api/draft | POST /api/webform | POST /api/brief-mockup"})
+        if self.path not in ("/api/lead", "/api/draft", "/api/webform", "/api/brief-mockup", "/api/production-mockup"):
+            self.send_json(404, {"error": "Endpoints: POST /api/lead | POST /api/draft | POST /api/webform | POST /api/brief-mockup | POST /api/production-mockup"})
+            return
+
+        # ── /api/production-mockup — HTML real de producción (SOLO uso interno) ──
+        # Se llama MANUALMENTE (no automático) cuando el cliente confirma el
+        # pedido. Requiere el mismo shape de brief que /api/brief-mockup, más
+        # un deal_id de Pipedrive para notificar el resultado.
+        if self.path == "/api/production-mockup":
+            length = int(self.headers.get("Content-Length", 0))
+            body   = self.rfile.read(length)
+            try:
+                data = json.loads(body)
+            except Exception:
+                self.send_json(400, {"error": "JSON inválido"})
+                return
+            missing = [f for f in ["empresa"] if not data.get(f)]
+            if missing:
+                self.send_json(400, {"error": f"Campos requeridos: {missing}"})
+                return
+            self.send_json(202, {"status": "accepted", "message": "Generando mockup de producción (HTML real) en background — puede tardar 2-3 minutos"})
+            def run_production(brief=data):
+                try:
+                    deal_id = brief.get("deal_id")
+                    log.info(f"🏗️  Producción HTML real: {brief.get('empresa')}")
+                    result = generate_production_mockup(brief, deal_id)
+                    token = os.environ.get("PRODUCTION_DOWNLOAD_TOKEN", "")
+                    if result.get("ok"):
+                        html_link = f"{result['download_url_html']}?token={token}" if token else result["download_url_html"]
+                        png_link  = f"{result['download_url_png']}?token={token}" if (token and result.get('download_url_png')) else result.get("download_url_png")
+                        msg = (
+                            f"🏗️ Mockup de PRODUCCIÓN listo — {brief.get('empresa')}\n\n"
+                            f"📄 Descargar HTML: {html_link}\n" +
+                            (f"🖼️ Preview PNG: {png_link}\n" if png_link else "") +
+                            f"\n⚠️ Uso interno IDEUSS — no compartir el link HTML con el cliente."
+                        )
+                        tg_send(msg)
+                        if deal_id:
+                            http_post(f"https://api.pipedrive.com/v1/notes?api_token={PIPEDRIVE_API_KEY}",
+                                      {"content": msg.replace("\n", "<br>"), "deal_id": deal_id})
+                        log.info(f"✅ Producción completada: {brief.get('empresa')} → {result['html_filename']}")
+                    else:
+                        log.error(f"❌ Error producción: {result.get('error')}")
+                        tg_send(f"❌ Error generando mockup de producción para {brief.get('empresa')}: {result.get('error')}")
+                except Exception as e:
+                    log.error(f"❌ Error /api/production-mockup: {e}", exc_info=True)
+            threading.Thread(target=run_production, daemon=True).start()
             return
 
         # ── /api/webform — Webhook formulario Fabrica Web ──────────────
