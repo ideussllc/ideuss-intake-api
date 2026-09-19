@@ -627,18 +627,23 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
         "guardar directamente como archivo .html y abrir en un navegador."
     )
     if foto_hero or foto_guia:
-        fotos_disponibles = "".join([
-            f"- Foto principal (hero): {foto_hero}\n" if foto_hero else "",
-            f"- Foto secundaria (sección de autoridad/guía): {foto_guia}\n" if foto_guia else "",
-        ])
+        lineas_fotos = []
+        if foto_hero:
+            lineas_fotos.append(f"- Foto principal (hero): tenés esta URL real, usala en <img src=\"{foto_hero}\">.")
+        else:
+            lineas_fotos.append("- Foto principal (hero): NO tenés foto — el hero va SIN ninguna etiqueta <img>, solo texto.")
+        if foto_guia:
+            lineas_fotos.append(f"- Foto secundaria (sección de autoridad/guía): tenés esta URL real, usala en <img src=\"{foto_guia}\">.")
+        else:
+            lineas_fotos.append("- Foto secundaria (sección de autoridad/guía): NO tenés foto — esa sección va SIN ninguna etiqueta <img>, solo texto.")
         instruccion_fotos = (
-            f"Tenés estas fotos reales ya generadas, usalas en <img src=\"...\"> exactamente con esa "
-            f"URL, sin modificarla:\n{fotos_disponibles}"
-            f"No inventes ninguna otra URL de imagen ni uses ningún otro <img> — para cualquier ícono "
-            f"o adorno que no sea una de estas dos fotos, usá SVG inline o UN SOLO emoji Unicode "
-            f"estándar (como ⏰ 🚀 📊 ✅), nunca una etiqueta <img> con una URL que no sea una de las "
-            f"de arriba (una URL inventada no carga), y nunca una palabra o carácter de ningún idioma "
-            f"—ni siquiera como decoración— donde debería ir un ícono."
+            "\n".join(lineas_fotos) + "\n"
+            "Regla general: nunca pongas una etiqueta <img> salvo con una de las dos URLs reales de "
+            "arriba, tal cual, sin modificarlas. Si una sección dice que no tenés foto, esa sección se "
+            "resuelve con texto solo — nunca con un <img> vacío, con src=\"\", ni con una URL inventada "
+            "(no carga). Para cualquier ícono o adorno usá SVG inline o UN SOLO emoji Unicode estándar "
+            "(como ⏰ 🚀 📊 ✅), nunca una palabra o carácter de ningún idioma —ni siquiera como "
+            "decoración— donde debería ir un ícono."
         )
     else:
         instruccion_fotos = (
