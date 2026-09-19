@@ -1,15 +1,11 @@
-FROM python:3.11-slim
+FROM mcr.microsoft.com/playwright/python:v1.47.0-jammy
 
 WORKDIR /app
 
-# Instalar dependencias
+# Instalar dependencias (Chromium + deps del sistema ya vienen preinstalados
+# en esta imagen base, evita el fallo de 'apt' en python:3.11-slim)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Playwright + Chromium (solo para /api/production-mockup — captura de
-# screenshot del HTML final generado). Instala dependencias del sistema
-# necesarias para correr Chromium headless en Debian slim.
-RUN playwright install --with-deps chromium
 
 # Copiar código
 COPY main.py .
