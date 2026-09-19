@@ -6,6 +6,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Playwright + Chromium (solo para /api/production-mockup — captura de
+# screenshot del HTML final generado). Instala dependencias del sistema
+# necesarias para correr Chromium headless en Debian slim.
+RUN playwright install --with-deps chromium
+
 # Copiar código
 COPY main.py .
 
