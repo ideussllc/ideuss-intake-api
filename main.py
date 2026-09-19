@@ -560,7 +560,52 @@ def generate_storybrand_copy(brief: dict) -> str | None:
 BRIEF_MOCKUPS_DIR = "/app/brief_mockups"
 
 
-def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str) -> str | None:
+def generate_mockup_photo(nicho: str, escena: str) -> str | None:
+    """
+    Genera UNA foto de ejemplo realista con FAL.ai para usar como imagen dentro
+    del mockup avanzado — a diferencia del enfoque viejo, esto nunca lleva
+    texto: se le pide explícitamente a Flux que no dibuje palabras, logos ni
+    letreros, que es precisamente lo único que un modelo de imagen no sabe
+    hacer bien. La foto en sí (personas, objetos, escenas) SÍ la renderiza
+    bien — el problema de siempre era pedirle que dibujara texto legible.
+    Devuelve la URL de FAL directamente (ya alojada en su CDN); si falla,
+    el HTML simplemente queda sin esa imagen, no es un paso obligatorio.
+    """
+    fal_key = os.environ.get("FAL_KEY", "")
+    if not fal_key:
+        return None
+    prompt = (
+        f"Professional photograph for a {nicho} business, {escena}, "
+        f"modern minimal style, warm natural lighting with a subtle orange "
+        f"accent tone, photorealistic, high quality stock photography. "
+        f"IMPORTANT: no text, no words, no letters, no logos, no signage, "
+        f"no readable text of any kind anywhere in the image."
+    )
+    try:
+        payload = json.dumps({
+            "prompt":      prompt,
+            "image_size":  "landscape_4_3",
+            "num_images":  1,
+            "enable_safety_checker": False,
+        }).encode()
+        req = urllib.request.Request(
+            "https://fal.run/fal-ai/flux/schnell",
+            data=payload,
+            headers={"Authorization": f"Key {fal_key}", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, context=SSL_CTX, timeout=60) as r:
+            result = json.loads(r.read())
+        images = result.get("images", [])
+        if images:
+            return images[0].get("url", "") or None
+    except Exception as e:
+        log.warning(f"FAL error (foto de mockup): {e}")
+    return None
+
+
+def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
+                                   foto_hero: str | None, foto_guia: str | None) -> str | None:
     """
     Paso 2 — Convierte el guión StoryBrand en HTML/Tailwind real (mismo patrón
     que generate_production_html, pero con modelos de nivel intermedio: ni
@@ -581,6 +626,23 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str)
         "sin explicaciones, sin markdown, sin fences de código, listo para "
         "guardar directamente como archivo .html y abrir en un navegador."
     )
+    if foto_hero or foto_guia:
+        fotos_disponibles = "".join([
+            f"- Foto principal (hero): {foto_hero}\n" if foto_hero else "",
+            f"- Foto secundaria (sección de autoridad/guía): {foto_guia}\n" if foto_guia else "",
+        ])
+        instruccion_fotos = (
+            f"Tenés estas fotos reales ya generadas, usalas en <img src=\"...\"> exactamente con esa "
+            f"URL, sin modificarla:\n{fotos_disponibles}"
+            f"No inventes ninguna otra URL de imagen ni uses ningún otro <img> — para cualquier ícono "
+            f"o adorno que no sea una de estas dos fotos, usá SVG inline o emoji, nunca una etiqueta "
+            f"<img> con una URL que no sea una de las de arriba (una URL inventada no carga)."
+        )
+    else:
+        instruccion_fotos = (
+            "No uses ninguna etiqueta <img> — no hay fotos disponibles para este mockup. Para íconos "
+            "o adornos usá SVG inline o emoji."
+        )
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en una Landing "
         f"Page HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: diseño limpio y "
@@ -592,6 +654,7 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str)
         f"placeholders tipo 'lorem ipsum'. Esta es una vista previa para enganchar al prospecto antes "
         f"de que confirme el proyecto, no necesita widgets interactivos con JavaScript (calculadoras, "
         f"calendarios) — el foco es que el diseño y el copy se vean profesionales.\n\n"
+        f"IMÁGENES: {instruccion_fotos}\n\n"
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
     )
     # Etapa de enganche (brief, antes de confirmar): nivel intermedio — ambos
@@ -628,7 +691,10 @@ def generate_advanced_mockup(brief: dict) -> str | None:
         log.warning("  No se pudo generar copy StoryBrand — fallback a mockup genérico")
         return None
 
-    html = generate_advanced_mockup_html(copy_sb, nombre, nicho)
+    foto_hero = generate_mockup_photo(nicho, "wide hero banner shot representing the business")
+    foto_guia = generate_mockup_photo(nicho, "close-up shot conveying trust and expertise, like a professional at work")
+
+    html = generate_advanced_mockup_html(copy_sb, nombre, nicho, foto_hero, foto_guia)
     if not html:
         log.warning("  No se pudo generar HTML avanzado — fallback a mockup genérico")
         return None
