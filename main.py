@@ -552,7 +552,7 @@ def generate_storybrand_copy(brief: dict) -> str | None:
         f"5. Llamado a la Acción Directo y Transaccional, 6. Lo que está en juego (Éxito vs. Fracaso)."
     )
     # Etapa prospectiva: modelo gratis
-    return call_openrouter("nvidia/nemotron-3-ultra-550b-a55b:free", system, user, max_tokens=1200) or \
+    return call_openrouter("nvidia/nemotron-3.5-lightning:free", system, user, max_tokens=1200) or \
            call_openrouter("deepseek/deepseek-chat", system, user, max_tokens=1200)
 
 
