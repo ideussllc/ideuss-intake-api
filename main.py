@@ -635,13 +635,16 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
             f"Tenés estas fotos reales ya generadas, usalas en <img src=\"...\"> exactamente con esa "
             f"URL, sin modificarla:\n{fotos_disponibles}"
             f"No inventes ninguna otra URL de imagen ni uses ningún otro <img> — para cualquier ícono "
-            f"o adorno que no sea una de estas dos fotos, usá SVG inline o emoji, nunca una etiqueta "
-            f"<img> con una URL que no sea una de las de arriba (una URL inventada no carga)."
+            f"o adorno que no sea una de estas dos fotos, usá SVG inline o UN SOLO emoji Unicode "
+            f"estándar (como ⏰ 🚀 📊 ✅), nunca una etiqueta <img> con una URL que no sea una de las "
+            f"de arriba (una URL inventada no carga), y nunca una palabra o carácter de ningún idioma "
+            f"—ni siquiera como decoración— donde debería ir un ícono."
         )
     else:
         instruccion_fotos = (
             "No uses ninguna etiqueta <img> — no hay fotos disponibles para este mockup. Para íconos "
-            "o adornos usá SVG inline o emoji."
+            "o adornos usá SVG inline o UN SOLO emoji Unicode estándar (como ⏰ 🚀 📊 ✅), nunca una "
+            "palabra o carácter de ningún idioma —ni siquiera como decoración— donde debería ir un ícono."
         )
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en una Landing "
