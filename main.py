@@ -670,7 +670,8 @@ def _instruccion_fotos(foto_hero: str | None, foto_guia: str | None) -> str:
 
 
 def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
-                                   foto_hero: str | None, foto_guia: str | None) -> str | None:
+                                   foto_hero: str | None, foto_guia: str | None,
+                                   paleta: str | None = None) -> str | None:
     """
     Paso 2 — Convierte el guión StoryBrand en HTML/Tailwind real (mismo patrón
     que generate_production_html, pero con modelos de nivel intermedio: ni
@@ -683,6 +684,11 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
     detallado fuera el prompt — el problema es de la tecnología, no del texto
     de entrada. Generar HTML real y capturarlo con Playwright, como ya hace
     el mockup de producción, resuelve esto de raíz.
+
+    `paleta`: descripción libre de la identidad de marca del cliente (colores
+    hex, tipografía, tono visual) — para marcas propias (ej. alianzas,
+    clientes con manual de marca ya definido) en vez de la paleta genérica
+    IDEUSS. Si se omite, usa el naranja #f0a500 de siempre.
     """
     system = (
         "Eres un desarrollador frontend senior experto en Tailwind CSS. "
@@ -692,17 +698,19 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
         "guardar directamente como archivo .html y abrir en un navegador."
     )
     instruccion_fotos = _instruccion_fotos(foto_hero, foto_guia)
+    identidad_marca = paleta or (
+        "identidad de marca IDEUSS (acentos en naranja #f0a500, fondo blanco, tipografía sans-serif)"
+    )
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en una Landing "
         f"Page HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: diseño limpio y "
-        f"moderno con identidad de marca IDEUSS (acentos en naranja #f0a500, fondo blanco, tipografía "
-        f"sans-serif), header con logo placeholder y navegación, hero section con el titular/subtítulo/"
-        f"CTA reales del copy, sección de problema con iconos, sección de autoridad/testimonios, "
-        f"tarjetas para el plan de 3 pasos, sección de éxito vs. riesgo, y CTA final destacado. Debe "
-        f"verse como un sitio real terminado, no un boceto — usa contenido real del texto, sin "
-        f"placeholders tipo 'lorem ipsum'. Esta es una vista previa para enganchar al prospecto antes "
-        f"de que confirme el proyecto, no necesita widgets interactivos con JavaScript (calculadoras, "
-        f"calendarios) — el foco es que el diseño y el copy se vean profesionales.\n\n"
+        f"moderno con {identidad_marca}, header con logo placeholder y navegación, hero section con "
+        f"el titular/subtítulo/CTA reales del copy, sección de problema con iconos, sección de "
+        f"autoridad/testimonios, tarjetas para el plan de 3 pasos, sección de éxito vs. riesgo, y CTA "
+        f"final destacado. Debe verse como un sitio real terminado, no un boceto — usa contenido real "
+        f"del texto, sin placeholders tipo 'lorem ipsum'. Esta es una vista previa para enganchar al "
+        f"prospecto antes de que confirme el proyecto, no necesita widgets interactivos con JavaScript "
+        f"(calculadoras, calendarios) — el foco es que el diseño y el copy se vean profesionales.\n\n"
         f"IMÁGENES: {instruccion_fotos}\n\n"
         f"{_INSTRUCCION_CONTACTO}\n\n"
         f"TEXTO STORYBRAND:\n{storybrand_copy}"
@@ -749,7 +757,8 @@ def generate_advanced_mockup(brief: dict) -> str | None:
     foto_hero = generate_mockup_photo(nicho, "wide hero banner shot representing the business")
     foto_guia = generate_mockup_photo(nicho, "close-up shot conveying trust and expertise, like a professional at work")
 
-    html = generate_advanced_mockup_html(copy_sb, nombre, nicho, foto_hero, foto_guia)
+    paleta = brief.get("paleta")  # opcional — identidad de marca propia (ej. alianzas, clientes con manual de marca)
+    html = generate_advanced_mockup_html(copy_sb, nombre, nicho, foto_hero, foto_guia, paleta)
     if not html:
         log.warning("  No se pudo generar HTML avanzado — fallback a mockup genérico")
         return None
@@ -784,7 +793,8 @@ PRODUCTION_MOCKUPS_DIR = "/app/production_mockups"
 
 
 def generate_production_html(storybrand_copy: str, nombre: str,
-                              foto_hero: str | None = None, foto_guia: str | None = None) -> str | None:
+                              foto_hero: str | None = None, foto_guia: str | None = None,
+                              paleta: str | None = None) -> str | None:
     """
     Genera el HTML/Tailwind real (editable) a partir del copy StoryBrand.
     Etapa de producción: usa modelos premium (mejor calidad, ya no gratis)
@@ -793,6 +803,11 @@ def generate_production_html(storybrand_copy: str, nombre: str,
     Recibe fotos igual que el mockup avanzado (mismo `_instruccion_fotos`) —
     hasta el 19-sep-2026 esta función no las recibía, y el mockup de
     producción salía sin ninguna imagen aunque el avanzado ya las tuviera.
+
+    `paleta`: descripción libre de la identidad de marca del cliente (colores
+    hex, tipografía, tono visual) — para marcas propias (ej. alianzas,
+    clientes con manual de marca ya definido) en vez de la paleta genérica
+    IDEUSS. Si se omite, usa el naranja #f0a500 de siempre.
     """
     system = (
         "Eres un desarrollador frontend senior experto en Tailwind CSS. "
@@ -802,11 +817,13 @@ def generate_production_html(storybrand_copy: str, nombre: str,
         "guardar directamente como archivo .html y abrir en un navegador."
     )
     instruccion_fotos = _instruccion_fotos(foto_hero, foto_guia)
+    identidad_marca = paleta or (
+        "identidad de marca IDEUSS (acentos en naranja #f0a500, fondo blanco, tipografía sans-serif)"
+    )
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' y conviértelo en una Landing Page "
         f"HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: "
-        f"diseño limpio y moderno con identidad de marca IDEUSS (acentos en naranja #f0a500, "
-        f"fondo blanco, tipografía sans-serif), header con logo placeholder y navegación, "
+        f"diseño limpio y moderno con {identidad_marca}, header con logo placeholder y navegación, "
         f"hero section con el titular/subtítulo/CTA reales del copy, sección de problema con "
         f"iconos, sección de autoridad/testimonios, tarjetas para el plan de 3 pasos, sección "
         f"de éxito vs. riesgo, y CTA final destacado. Debe verse como un sitio real terminado, "
@@ -869,7 +886,8 @@ def generate_production_mockup(brief: dict, deal_id) -> dict:
     foto_hero = generate_mockup_photo(nicho, "wide hero banner shot representing the business")
     foto_guia = generate_mockup_photo(nicho, "close-up shot conveying trust and expertise, like a professional at work")
 
-    html = generate_production_html(copy_sb, nombre, foto_hero, foto_guia)
+    paleta = brief.get("paleta")  # opcional — identidad de marca propia (ej. alianzas, clientes con manual de marca)
+    html = generate_production_html(copy_sb, nombre, foto_hero, foto_guia, paleta)
     if not html:
         return {"ok": False, "error": "No se pudo generar HTML de producción"}
 
