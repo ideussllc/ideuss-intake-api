@@ -671,7 +671,7 @@ def _instruccion_fotos(foto_hero: str | None, foto_guia: str | None) -> str:
 
 def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
                                    foto_hero: str | None, foto_guia: str | None,
-                                   paleta: str | None = None) -> str | None:
+                                   paleta: str | None = None, logo_svg: str | None = None) -> str | None:
     """
     Paso 2 — Convierte el guión StoryBrand en HTML/Tailwind real (mismo patrón
     que generate_production_html, pero con modelos de nivel intermedio: ni
@@ -689,6 +689,9 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
     hex, tipografía, tono visual) — para marcas propias (ej. alianzas,
     clientes con manual de marca ya definido) en vez de la paleta genérica
     IDEUSS. Si se omite, usa el naranja #f0a500 de siempre.
+
+    `logo_svg`: SVG real del logo del cliente — mismo mecanismo de marcador +
+    inyección determinística que `generate_production_html`/`_inject_logo_svg`.
     """
     system = (
         "Eres un desarrollador frontend senior experto en Tailwind CSS. "
@@ -701,10 +704,18 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
     identidad_marca = paleta or (
         "identidad de marca IDEUSS (acentos en naranja #f0a500, fondo blanco, tipografía sans-serif)"
     )
+    instruccion_logo = (
+        f"El cliente tiene un logo real: en vez de dibujar un ícono o iniciales, coloca EXACTAMENTE "
+        f"el texto `{_LOGO_MARKER}` (tal cual, sin modificarlo) como único contenido dentro del "
+        f"contenedor del logo, tanto en el header como en el footer — un script externo lo "
+        f"reemplazará por el SVG real después."
+        if logo_svg else
+        "header con logo placeholder y navegación"
+    )
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' ({nicho}) y conviértelo en una Landing "
         f"Page HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: diseño limpio y "
-        f"moderno con {identidad_marca}, header con logo placeholder y navegación, hero section con "
+        f"moderno con {identidad_marca}, {instruccion_logo}, hero section con "
         f"el titular/subtítulo/CTA reales del copy, sección de problema con iconos, sección de "
         f"autoridad/testimonios, tarjetas para el plan de 3 pasos, sección de éxito vs. riesgo, y CTA "
         f"final destacado. Debe verse como un sitio real terminado, no un boceto — usa contenido real "
@@ -731,6 +742,7 @@ def generate_advanced_mockup_html(storybrand_copy: str, nombre: str, nicho: str,
         html = html.strip()
         html = re.sub(r'^```(?:html)?\s*', '', html)
         html = re.sub(r'\s*```$', '', html)
+        html = _inject_logo_svg(html, logo_svg)
     return html
 
 
@@ -758,7 +770,8 @@ def generate_advanced_mockup(brief: dict) -> str | None:
     foto_guia = generate_mockup_photo(nicho, "close-up shot conveying trust and expertise, like a professional at work")
 
     paleta = brief.get("paleta")  # opcional — identidad de marca propia (ej. alianzas, clientes con manual de marca)
-    html = generate_advanced_mockup_html(copy_sb, nombre, nicho, foto_hero, foto_guia, paleta)
+    logo_svg = brief.get("logo_svg")  # opcional — SVG real del logo del cliente
+    html = generate_advanced_mockup_html(copy_sb, nombre, nicho, foto_hero, foto_guia, paleta, logo_svg)
     if not html:
         log.warning("  No se pudo generar HTML avanzado — fallback a mockup genérico")
         return None
@@ -792,9 +805,29 @@ def generate_advanced_mockup(brief: dict) -> str | None:
 PRODUCTION_MOCKUPS_DIR = "/app/production_mockups"
 
 
+_LOGO_MARKER = "<!--LOGO_CLIENTE-->"
+
+
+def _inject_logo_svg(html: str, logo_svg: str | None) -> str:
+    """
+    Reemplaza el marcador `_LOGO_MARKER` (que el LLM coloca en header/footer
+    siguiendo la instrucción del prompt) por el SVG real del cliente,
+    redimensionado a 40x40. Se hace por código —no se le pide al LLM que
+    copie el SVG textual, poco confiable con archivos grandes (10-15 KB con
+    múltiples <linearGradient>) — el LLM solo necesita dejar el marcador en
+    el lugar correcto, la inyección determinística la hace este bloque.
+    Si no hay logo_svg o el marcador no aparece, el HTML vuelve sin cambios
+    (fallback: el LLM deja su propio placeholder de logo genérico).
+    """
+    if not html or not logo_svg or _LOGO_MARKER not in html:
+        return html
+    svg_inline = re.sub(r'width="\d+"\s+height="\d+"', 'width="40" height="40"', logo_svg.strip(), count=1)
+    return html.replace(_LOGO_MARKER, svg_inline)
+
+
 def generate_production_html(storybrand_copy: str, nombre: str,
                               foto_hero: str | None = None, foto_guia: str | None = None,
-                              paleta: str | None = None) -> str | None:
+                              paleta: str | None = None, logo_svg: str | None = None) -> str | None:
     """
     Genera el HTML/Tailwind real (editable) a partir del copy StoryBrand.
     Etapa de producción: usa modelos premium (mejor calidad, ya no gratis)
@@ -808,6 +841,11 @@ def generate_production_html(storybrand_copy: str, nombre: str,
     hex, tipografía, tono visual) — para marcas propias (ej. alianzas,
     clientes con manual de marca ya definido) en vez de la paleta genérica
     IDEUSS. Si se omite, usa el naranja #f0a500 de siempre.
+
+    `logo_svg`: SVG real del logo del cliente (texto crudo del archivo .svg).
+    Se inyecta por código en el lugar donde el LLM deja `_LOGO_MARKER` — ver
+    `_inject_logo_svg`. Si se omite, el LLM genera su propio placeholder
+    (círculo con inicial), como siempre.
     """
     system = (
         "Eres un desarrollador frontend senior experto en Tailwind CSS. "
@@ -820,10 +858,18 @@ def generate_production_html(storybrand_copy: str, nombre: str,
     identidad_marca = paleta or (
         "identidad de marca IDEUSS (acentos en naranja #f0a500, fondo blanco, tipografía sans-serif)"
     )
+    instruccion_logo = (
+        f"El cliente tiene un logo real: en vez de dibujar un ícono o iniciales, coloca EXACTAMENTE "
+        f"el texto `{_LOGO_MARKER}` (tal cual, sin modificarlo) como único contenido dentro del "
+        f"contenedor del logo, tanto en el header como en el footer — un script externo lo "
+        f"reemplazará por el SVG real después."
+        if logo_svg else
+        "Header con logo placeholder (círculo con inicial o ícono simple) y navegación."
+    )
     user = (
         f"Toma el siguiente texto StoryBrand para '{nombre}' y conviértelo en una Landing Page "
         f"HTML completa, responsiva, estilizada con Tailwind CSS. Requisitos: "
-        f"diseño limpio y moderno con {identidad_marca}, header con logo placeholder y navegación, "
+        f"diseño limpio y moderno con {identidad_marca}, {instruccion_logo}, "
         f"hero section con el titular/subtítulo/CTA reales del copy, sección de problema con "
         f"iconos, sección de autoridad/testimonios, tarjetas para el plan de 3 pasos, sección "
         f"de éxito vs. riesgo, y CTA final destacado. Debe verse como un sitio real terminado, "
@@ -844,6 +890,7 @@ def generate_production_html(storybrand_copy: str, nombre: str,
         html = html.strip()
         html = re.sub(r'^```(?:html)?\s*', '', html)
         html = re.sub(r'\s*```$', '', html)
+        html = _inject_logo_svg(html, logo_svg)
     return html
 
 
@@ -887,7 +934,8 @@ def generate_production_mockup(brief: dict, deal_id) -> dict:
     foto_guia = generate_mockup_photo(nicho, "close-up shot conveying trust and expertise, like a professional at work")
 
     paleta = brief.get("paleta")  # opcional — identidad de marca propia (ej. alianzas, clientes con manual de marca)
-    html = generate_production_html(copy_sb, nombre, foto_hero, foto_guia, paleta)
+    logo_svg = brief.get("logo_svg")  # opcional — SVG real del logo del cliente
+    html = generate_production_html(copy_sb, nombre, foto_hero, foto_guia, paleta, logo_svg)
     if not html:
         return {"ok": False, "error": "No se pudo generar HTML de producción"}
 
